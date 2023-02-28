@@ -21,10 +21,28 @@
 //                limitations under the License.
 
 #include "DualCamera.h"
+#include "cpx.h"
+
+void
+reporter(int is_error,
+	const char* file,
+	int line,
+	const char* function,
+	const char* msg)
+{
+	fprintf(is_error ? stderr : stdout,
+		"%s%s(%d) - %s: %s\n",
+		is_error ? "ERROR " : "",
+		file,
+		line,
+		function,
+		msg);
+}
+
 
 const char* cameraName = "DualCamera";
 
-DualCamera::DualCamera() : initialized_(false)
+DualCamera::DualCamera() : initialized_(false), cpx(nullptr)
 {
 	CreateProperty(MM::g_Keyword_Name, cameraName, MM::String, true);
 
@@ -37,16 +55,11 @@ DualCamera::DualCamera() : initialized_(false)
 	// CameraID
 	CreateProperty(MM::g_Keyword_CameraID, "V1.0", MM::String, true);
 
-	// binning
-	CreateProperty(MM::g_Keyword_Binning, "1", MM::Integer, false);
-
-	std::vector<std::string> binningValues;
-	binningValues.push_back("1");
-	SetAllowedValues(MM::g_Keyword_Binning, binningValues);
 }
 
 DualCamera::~DualCamera()
 {
+
 }
 
 int DualCamera::Initialize()
@@ -54,8 +67,23 @@ int DualCamera::Initialize()
 	if (initialized_)
 		return DEVICE_OK;
 
-	initialized_ = true;
+	// binning
+	CreateProperty(MM::g_Keyword_Binning, "1", MM::Integer, false);
 
+	std::vector<std::string> binningValues;
+	binningValues.push_back("1");
+	SetAllowedValues(MM::g_Keyword_Binning, binningValues);
+
+	// test cpx loading
+	cpx = cpx_init(reporter);
+	auto dm = cpx_device_manager(cpx);
+	CpxProperties props = {};
+	int ret = getCpxProperties(props);
+	if (ret != DEVICE_OK)
+		return ret;
+
+
+	initialized_ = true;
 	return DEVICE_OK;
 }
 
@@ -162,4 +190,15 @@ int DualCamera::StartSequenceAcquisition(long numImages, double interval_ms, boo
 int DualCamera::StopSequenceAcquisition()
 {
 	return CCameraBase::StopSequenceAcquisition();
+}
+
+int DualCamera::getCpxProperties(CpxProperties& props)
+{
+	props = {};
+	return cpx_get_configuration(cpx, &props);
+}
+
+int DualCamera::setCpxProperties(CpxProperties& props)
+{
+	return cpx_configure(cpx, &props);
 }

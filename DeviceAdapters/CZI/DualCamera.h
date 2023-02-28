@@ -30,6 +30,8 @@
 #define CONTROLLER_ERROR 10002
 
 extern const char* cameraName;
+struct CpxRuntime;
+struct CpxProperties;
 
 class DualCamera : public CCameraBase<DualCamera>
 {
@@ -62,4 +64,8 @@ public:
 
 private:
 	bool initialized_;
+	CpxRuntime* cpx;
+
+	int getCpxProperties(CpxProperties& props);
+	int setCpxProperties(CpxProperties& props);
 };
