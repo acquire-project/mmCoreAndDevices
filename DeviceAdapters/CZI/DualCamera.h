@@ -23,11 +23,14 @@
 #pragma once
 
 #include <string>
+#include <vector>
 #include "DeviceBase.h"
+#include "ImgBuffer.h"
 
-#define ERR_INVALID_DEVICE_NAME 10000
-#define OUT_OF_RANGE 10001
-#define CONTROLLER_ERROR 10002
+#define ERR_WRONG
+#define ERR_INVALID_DEVICE_NAME 90000
+#define ERR_CPX_INIT 90001
+#define ERR_CPX_CONFIURE_FAILED 90002
 
 extern const char* cameraName;
 struct CpxRuntime;
@@ -54,6 +57,7 @@ public:
 	int ClearROI();
 	int IsExposureSequenceable(bool & isSequenceable) const;
 	const unsigned char * GetImageBuffer();
+	const unsigned char* GetImageBuffer(unsigned channel);
 	unsigned GetImageWidth() const;
 	unsigned GetImageHeight() const;
 	unsigned GetImageBytesPerPixel() const;
@@ -61,11 +65,17 @@ public:
 	int StartSequenceAcquisition(long numImages, double interval_ms, bool stopOnOverflow);
 	int StopSequenceAcquisition();
 	unsigned GetNumberOfComponents() const;
+	unsigned GetNumberOfChannels() const;
+	int GetChannelName(unsigned channel, char* name);
 
 private:
 	bool initialized_;
+	static DualCamera* g_instance;
 	CpxRuntime* cpx;
+	std::vector<ImgBuffer> imgs;
 
-	int getCpxProperties(CpxProperties& props);
+	int getCpxProperties(CpxProperties& props) const;
 	int setCpxProperties(CpxProperties& props);
+	static void reporter(int is_error, const char* file, int line, const char* function, const char* msg);
+	int readFrame(int stream, CpxProperties& props);
 };
