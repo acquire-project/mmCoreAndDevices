@@ -1,5 +1,5 @@
 ///////////////////////////////////////////////////////////////////////////////
-// FILE:          DualCamera.cpp
+// FILE:          AcquireCamera.cpp
 // PROJECT:       Micro-Manager
 // SUBSYSTEM:     DeviceAdapters
 //-----------------------------------------------------------------------------
@@ -20,7 +20,7 @@
 //                See the License for the specific language governing permissions and
 //                limitations under the License.
 
-#include "DualCamera.h"
+#include "AcquireCamera.h"
 #include "cpx.h"
 #include "device/device.manager.h"
 #include <sstream>
@@ -37,30 +37,32 @@
 using namespace std;
 
 
-const char* cameraName = "DualCamera";
-DualCamera* DualCamera::g_instance = nullptr;
+const char* cameraName = "AcquireCamera";
+AcquireCamera* AcquireCamera::g_instance = nullptr;
+const int DEMO_IMAGE_WIDTH = 64;
+const int DEMO_IMAGE_HEIGHT = 48;
 
-DualCamera::DualCamera() : initialized_(false)
+AcquireCamera::AcquireCamera() : initialized_(false)
 {
 	CreateProperty(MM::g_Keyword_Name, cameraName, MM::String, true);
 
 	// Description
-	CreateProperty(MM::g_Keyword_Description, "Loads images from disk according to position of focusing stage", MM::String, true);
+	CreateProperty(MM::g_Keyword_Description, "Records simultaneously from two Hammamatsu cameras", MM::String, true);
 
 	// CameraName
-	CreateProperty(MM::g_Keyword_CameraName, "DualCamera", MM::String, true);
+	CreateProperty(MM::g_Keyword_CameraName, "AcquireCamera", MM::String, true);
 
 	// CameraID
 	CreateProperty(MM::g_Keyword_CameraID, "V1.0", MM::String, true);
 
 }
 
-DualCamera::~DualCamera()
+AcquireCamera::~AcquireCamera()
 {
 	Shutdown();
 }
 
-int DualCamera::Initialize()
+int AcquireCamera::Initialize()
 {
 	if (initialized_)
 		return DEVICE_OK;
@@ -74,7 +76,7 @@ int DualCamera::Initialize()
 
 	// test cpx loading
 	g_instance = this;
-	cpx = cpx_init(DualCamera::reporter);
+	cpx = cpx_init(AcquireCamera::reporter);
 	auto dm = cpx_device_manager(cpx);
 	if (!cpx || !dm)
 	{
@@ -100,58 +102,56 @@ int DualCamera::Initialize()
 	// we are assuming that cameras are identical
 	CreateProperty("LineIntervalUs", to_string(props.video[0].camera.settings.line_interval_us).c_str(), MM::Float, false);
 
-	auto width = props.video[0].camera.settings.shape.x;
-	auto height = props.video[0].camera.settings.shape.y;
+	//auto width = props.video[0].camera.settings.shape.x;
+	//auto height = props.video[0].camera.settings.shape.y;
 	imgs.resize(2); // two 8-bit images
-	imgs[0].Resize(width, height, 1);
-	imgs[1].Resize(width, height, 1);
+	imgs[0].Resize(DEMO_IMAGE_WIDTH, DEMO_IMAGE_HEIGHT, 1);
+	imgs[1].Resize(DEMO_IMAGE_WIDTH, DEMO_IMAGE_HEIGHT, 1);
 
 	initialized_ = true;
 	return DEVICE_OK;
 }
 
-int DualCamera::Shutdown()
+int AcquireCamera::Shutdown()
 {
 	if (cpx)
 	{
-		cpx_stop(cpx);
 		cpx_shutdown(cpx);
+		cpx = nullptr;
 		g_instance = nullptr;
 	}
-
-	cpx = nullptr;
 
 	initialized_ = false;
 
 	return DEVICE_OK;
 }
 
-void DualCamera::GetName(char * name) const
+void AcquireCamera::GetName(char * name) const
 {
 	CDeviceUtils::CopyLimitedString(name, cameraName);
 }
 
-long DualCamera::GetImageBufferSize() const
+long AcquireCamera::GetImageBufferSize() const
 {
 	return imgs[0].Width() * imgs[0].Height() * imgs[0].Depth();
 }
 
-unsigned DualCamera::GetBitDepth() const
+unsigned AcquireCamera::GetBitDepth() const
 {
 	return 8;
 }
 
-int DualCamera::GetBinning() const
+int AcquireCamera::GetBinning() const
 {
 	return 1;
 }
 
-int DualCamera::SetBinning(int)
+int AcquireCamera::SetBinning(int)
 {
 	return DEVICE_OK;
 }
 
-void DualCamera::SetExposure(double exposure)
+void AcquireCamera::SetExposure(double exposure)
 {
 	CpxProperties props = {};
 	int ret = getCpxProperties(props);
@@ -165,7 +165,7 @@ void DualCamera::SetExposure(double exposure)
 
 }
 
-double DualCamera::GetExposure() const
+double AcquireCamera::GetExposure() const
 {
 	CpxProperties props = {};
 	int ret = getCpxProperties(props);
@@ -174,35 +174,35 @@ double DualCamera::GetExposure() const
 	return props.video[0].camera.settings.exposure_time_us / 1000.0;
 }
 
-int DualCamera::SetROI(unsigned x, unsigned y, unsigned xSize, unsigned ySize)
+int AcquireCamera::SetROI(unsigned x, unsigned y, unsigned xSize, unsigned ySize)
 {
 	return DEVICE_OK;
 }
 
-int DualCamera::GetROI(unsigned & x, unsigned & y, unsigned & xSize, unsigned & ySize)
+int AcquireCamera::GetROI(unsigned & x, unsigned & y, unsigned & xSize, unsigned & ySize)
 {
 
 	return DEVICE_OK;
 }
 
-int DualCamera::ClearROI()
+int AcquireCamera::ClearROI()
 {
 	return DEVICE_OK;
 }
 
-int DualCamera::IsExposureSequenceable(bool & isSequenceable) const
+int AcquireCamera::IsExposureSequenceable(bool & isSequenceable) const
 {
 	isSequenceable = false;
 
 	return DEVICE_OK;
 }
 
-const unsigned char * DualCamera::GetImageBuffer()
+const unsigned char * AcquireCamera::GetImageBuffer()
 {
 	return imgs[0].GetPixels();
 }
 
-const unsigned char* DualCamera::GetImageBuffer(unsigned channel)
+const unsigned char* AcquireCamera::GetImageBuffer(unsigned channel)
 {
 	if (channel > imgs.size() - 1)
 		return nullptr;
@@ -210,17 +210,17 @@ const unsigned char* DualCamera::GetImageBuffer(unsigned channel)
 	return imgs[channel].GetPixels();
 }
 
-unsigned DualCamera::GetNumberOfComponents() const
+unsigned AcquireCamera::GetNumberOfComponents() const
 {
 	return 1;
 }
 
-unsigned DualCamera::GetNumberOfChannels() const
+unsigned AcquireCamera::GetNumberOfChannels() const
 {
 	return (unsigned)imgs.size();
 }
 
-int DualCamera::GetChannelName(unsigned channel, char* name)
+int AcquireCamera::GetChannelName(unsigned channel, char* name)
 {
 	if (channel > imgs.size()-1)
 		return DEVICE_NONEXISTENT_CHANNEL;
@@ -230,22 +230,22 @@ int DualCamera::GetChannelName(unsigned channel, char* name)
 	return DEVICE_OK;
 }
 
-unsigned DualCamera::GetImageWidth() const
+unsigned AcquireCamera::GetImageWidth() const
 {
 	return imgs[0].Width();
 }
 
-unsigned DualCamera::GetImageHeight() const
+unsigned AcquireCamera::GetImageHeight() const
 {
 	return imgs[0].Height();
 }
 
-unsigned DualCamera::GetImageBytesPerPixel() const
+unsigned AcquireCamera::GetImageBytesPerPixel() const
 {
 	return 1;
 }
 
-int DualCamera::SnapImage()
+int AcquireCamera::SnapImage()
 {
 	CpxProperties props = {};
 	getCpxProperties(props);
@@ -271,16 +271,14 @@ int DualCamera::SnapImage()
 		SIZED("Trash"),
 		&props.video[1].storage.identifier);
 
-	cpx_configure(cpx, &props);
-
 	props.video[0].camera.settings.binning = 1;
 	props.video[0].camera.settings.pixel_type = SampleType_u8;
-	props.video[0].camera.settings.shape = {64, 48};
+	props.video[0].camera.settings.shape = {DEMO_IMAGE_WIDTH, DEMO_IMAGE_HEIGHT};
 	props.video[0].max_frame_count = 1;
 
 	props.video[1].camera.settings.binning = 1;
 	props.video[1].camera.settings.pixel_type = SampleType_u8;
-	props.video[1].camera.settings.shape = {64, 48};
+	props.video[1].camera.settings.shape = {DEMO_IMAGE_WIDTH, DEMO_IMAGE_HEIGHT};
 	props.video[1].max_frame_count = 1;
 
 	int ret = cpx_configure(cpx, &props);
@@ -306,29 +304,29 @@ int DualCamera::SnapImage()
 	return DEVICE_OK;
 }
 
-int DualCamera::StartSequenceAcquisition(long numImages, double interval_ms, bool stopOnOverflow)
+int AcquireCamera::StartSequenceAcquisition(long numImages, double interval_ms, bool stopOnOverflow)
 {
 	return CCameraBase::StartSequenceAcquisition(numImages, interval_ms, stopOnOverflow);
 }
 
-int DualCamera::StopSequenceAcquisition()
+int AcquireCamera::StopSequenceAcquisition()
 {
 	return CCameraBase::StopSequenceAcquisition();
 }
 
-int DualCamera::getCpxProperties(CpxProperties& props) const
+int AcquireCamera::getCpxProperties(CpxProperties& props) const
 {
 	props = {};
 	return cpx_get_configuration(cpx, &props);
 }
 
-int DualCamera::setCpxProperties(CpxProperties& props)
+int AcquireCamera::setCpxProperties(CpxProperties& props)
 {
 	return cpx_configure(cpx, &props);
 }
 
 // Send message to micro-manager log
-void DualCamera::reporter(int is_error, const char* file, int line, const char* function, const char* msg)
+void AcquireCamera::reporter(int is_error, const char* file, int line, const char* function, const char* msg)
 {
 	const int maxLength(6000);
 	char buffer[maxLength];
@@ -345,7 +343,7 @@ void DualCamera::reporter(int is_error, const char* file, int line, const char* 
 	}
 }
 
-int DualCamera::readFrame(int stream, CpxProperties& props)
+int AcquireCamera::readFrame(int stream, CpxProperties& props)
 {
 	const auto next = [](VideoFrame* cur) -> VideoFrame* {
 		return (VideoFrame*)(((uint8_t*)cur) + cur->bytes_of_frame);

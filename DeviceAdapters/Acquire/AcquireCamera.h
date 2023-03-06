@@ -36,11 +36,11 @@ extern const char* cameraName;
 struct CpxRuntime;
 struct CpxProperties;
 
-class DualCamera : public CCameraBase<DualCamera>
+class AcquireCamera : public CCameraBase<AcquireCamera>
 {
 public:
-	DualCamera();
-	~DualCamera();
+	AcquireCamera();
+	~AcquireCamera();
 
 	// Inherited via CCameraBase
 	int Initialize();
@@ -70,7 +70,7 @@ public:
 
 private:
 	bool initialized_;
-	static DualCamera* g_instance;
+	static AcquireCamera* g_instance;
 	CpxRuntime* cpx;
 	std::vector<ImgBuffer> imgs;
 

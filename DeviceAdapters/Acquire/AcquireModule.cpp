@@ -1,9 +1,9 @@
 ///////////////////////////////////////////////////////////////////////////////
-// FILE:          CZIModule.cpp
+// FILE:          AcquireModule.cpp
 // PROJECT:       Micro-Manager
 // SUBSYSTEM:     DeviceAdapters
 //-----------------------------------------------------------------------------
-// DESCRIPTION:   Module for CZI device adapters
+// DESCRIPTION:   Module for CZI Acquire device adapters
 //
 // AUTHOR:        Nenad Amodaj nenad@amodaj.com
 //
@@ -22,7 +22,7 @@
 
 #include "ModuleInterface.h"
 
-#include "DualCamera.h"
+#include "AcquireCamera.h"
 
 // Exported MMDevice API
 MODULE_API void InitializeModuleData()
@@ -39,7 +39,7 @@ MODULE_API MM::Device* CreateDevice(const char* deviceName)
 
 	if (deviceName_ == cameraName)
 	{
-		DualCamera* dev = new DualCamera();
+		AcquireCamera* dev = new AcquireCamera();
 		return dev;
 	}
 	

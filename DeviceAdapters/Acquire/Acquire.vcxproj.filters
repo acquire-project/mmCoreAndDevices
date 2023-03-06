@@ -15,36 +15,15 @@
     </Filter>
   </ItemGroup>
   <ItemGroup>
-    <ClInclude Include="DualCamera.h">
-      <Filter>Header Files</Filter>
-    </ClInclude>
-    <ClInclude Include="device\camera.h">
-      <Filter>Header Files</Filter>
-    </ClInclude>
-    <ClInclude Include="device\components.h">
-      <Filter>Header Files</Filter>
-    </ClInclude>
-    <ClInclude Include="device\device.h">
-      <Filter>Header Files</Filter>
-    </ClInclude>
-    <ClInclude Include="device\metadata.h">
-      <Filter>Header Files</Filter>
-    </ClInclude>
-    <ClInclude Include="device\signals.h">
-      <Filter>Header Files</Filter>
-    </ClInclude>
-    <ClInclude Include="device\stage.axis.h">
-      <Filter>Header Files</Filter>
-    </ClInclude>
-    <ClInclude Include="device\storage.h">
+    <ClInclude Include="AcquireCamera.h">
       <Filter>Header Files</Filter>
     </ClInclude>
   </ItemGroup>
   <ItemGroup>
-    <ClCompile Include="CZIModule.cpp">
+    <ClCompile Include="AcquireModule.cpp">
       <Filter>Source Files</Filter>
     </ClCompile>
-    <ClCompile Include="DualCamera.cpp">
+    <ClCompile Include="AcquireCamera.cpp">
       <Filter>Source Files</Filter>
     </ClCompile>
   </ItemGroup>

@@ -458,7 +458,7 @@ Project("{8BC9CEB8-8B4A-11D0-8D11-00A0C91BC942}") = "SigmaKoki", "DeviceAdapters
 EndProject
 Project("{8BC9CEB8-8B4A-11D0-8D11-00A0C91BC942}") = "Pixelink", "DeviceAdapters\Pixelink\Pixelink.vcxproj", "{899D6AEF-6BC3-4203-B566-4EA4B52D1E80}"
 EndProject
-Project("{8BC9CEB8-8B4A-11D0-8D11-00A0C91BC942}") = "CZI", "DeviceAdapters\CZI\CZI.vcxproj", "{20C9A1EA-92C6-4D98-8C91-81F7EBD1818F}"
+Project("{8BC9CEB8-8B4A-11D0-8D11-00A0C91BC942}") = "Acquire", "DeviceAdapters\Acquire\Acquire.vcxproj", "{20C9A1EA-92C6-4D98-8C91-81F7EBD1818F}"
 EndProject
 Global
 	GlobalSection(SolutionConfigurationPlatforms) = preSolution

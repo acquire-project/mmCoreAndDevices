@@ -19,18 +19,11 @@
     </ProjectConfiguration>
   </ItemGroup>
   <ItemGroup>
-    <ClInclude Include="device\camera.h" />
-    <ClInclude Include="device\components.h" />
-    <ClInclude Include="device\device.h" />
-    <ClInclude Include="device\metadata.h" />
-    <ClInclude Include="device\signals.h" />
-    <ClInclude Include="device\stage.axis.h" />
-    <ClInclude Include="device\storage.h" />
-    <ClInclude Include="DualCamera.h" />
+    <ClInclude Include="AcquireCamera.h" />
   </ItemGroup>
   <ItemGroup>
-    <ClCompile Include="CZIModule.cpp" />
-    <ClCompile Include="DualCamera.cpp" />
+    <ClCompile Include="AcquireModule.cpp" />
+    <ClCompile Include="AcquireCamera.cpp" />
   </ItemGroup>
   <ItemGroup>
     <ProjectReference Include="..\..\MMDevice\MMDevice-SharedRuntime.vcxproj">
@@ -43,6 +36,7 @@
     <ProjectGuid>{20c9a1ea-92c6-4d98-8c91-81f7ebd1818f}</ProjectGuid>
     <RootNamespace>CZI</RootNamespace>
     <WindowsTargetPlatformVersion>10.0</WindowsTargetPlatformVersion>
+    <ProjectName>Acquire</ProjectName>
   </PropertyGroup>
   <Import Project="$(VCTargetsPath)\Microsoft.Cpp.Default.props" />
   <PropertyGroup Condition="'$(Configuration)|$(Platform)'=='Debug|Win32'" Label="Configuration">
@@ -149,7 +143,7 @@
       <SDLCheck>true</SDLCheck>
       <PreprocessorDefinitions>_DEBUG;_CONSOLE;%(PreprocessorDefinitions)</PreprocessorDefinitions>
       <ConformanceMode>true</ConformanceMode>
-      <AdditionalIncludeDirectories>$(MM_3RDPARTYPRIVATE)\CZI\include;$(MM_3RDPARTYPRIVATE)\CZI\include\device;$(MM_MMDEVICE_INCLUDEDIR);$(MM_BOOST_INCLUDEDIR);%(AdditionalIncludeDirectories)</AdditionalIncludeDirectories>
+      <AdditionalIncludeDirectories>$(MM_3RDPARTYPRIVATE)\CZI\include;$(MM_MMDEVICE_INCLUDEDIR);$(MM_BOOST_INCLUDEDIR);%(AdditionalIncludeDirectories)</AdditionalIncludeDirectories>
     </ClCompile>
     <Link>
       <SubSystem>Console</SubSystem>
@@ -166,14 +160,13 @@
       <SDLCheck>true</SDLCheck>
       <PreprocessorDefinitions>NDEBUG;_CONSOLE;%(PreprocessorDefinitions)</PreprocessorDefinitions>
       <ConformanceMode>true</ConformanceMode>
-      <AdditionalIncludeDirectories>$(MM_3RDPARTYPRIVATE)\CZI\include;$(MM_3RDPARTYPRIVATE)\CZI\include\device;$(MM_MMDEVICE_INCLUDEDIR);%(AdditionalIncludeDirectories)</AdditionalIncludeDirectories>
-      <RuntimeLibrary>MultiThreadedDebugDLL</RuntimeLibrary>
+      <AdditionalIncludeDirectories>$(MM_3RDPARTYPRIVATE)\CZI\include;$(MM_MMDEVICE_INCLUDEDIR);%(AdditionalIncludeDirectories)</AdditionalIncludeDirectories>
+      <RuntimeLibrary>MultiThreadedDLL</RuntimeLibrary>
     </ClCompile>
     <Link>
       <SubSystem>Console</SubSystem>
       <EnableCOMDATFolding>true</EnableCOMDATFolding>
       <OptimizeReferences>true</OptimizeReferences>
-      <GenerateDebugInformation>true</GenerateDebugInformation>
       <AdditionalLibraryDirectories>$(MM_3RDPARTYPRIVATE)\CZI\lib;$(MM_BOOST_LIBDIR);%(AdditionalLibraryDirectories)</AdditionalLibraryDirectories>
       <AdditionalDependencies>$(MM_3RDPARTYPRIVATE)\CZI\Release\cpx.lib;$(MM_3RDPARTYPRIVATE)\CZI\c-blosc\lib\win64\libblosc.lib;kernel32.lib;user32.lib;gdi32.lib;winspool.lib;shell32.lib;ole32.lib;oleaut32.lib;uuid.lib;comdlg32.lib;advapi32.lib;%(AdditionalDependencies)</AdditionalDependencies>
     </Link>
