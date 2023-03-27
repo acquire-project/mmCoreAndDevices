@@ -39,8 +39,8 @@ using namespace std;
 
 const char* cameraName = "AcquireCamera";
 AcquireCamera* AcquireCamera::g_instance = nullptr;
-const int DEMO_IMAGE_WIDTH = 64;
-const int DEMO_IMAGE_HEIGHT = 48;
+const int DEMO_IMAGE_WIDTH = 640;
+const int DEMO_IMAGE_HEIGHT = 480;
 
 AcquireCamera::AcquireCamera() : initialized_(false)
 {
@@ -289,7 +289,7 @@ int AcquireCamera::SnapImage()
 	}
 
 	imgs[0].Resize(props.video[0].camera.settings.shape.x, props.video[0].camera.settings.shape.y, 1);
-	imgs[1].Resize(imgs[0].Width(), imgs[0].Height(), imgs[0].Depth());
+	imgs[1].Resize(props.video[1].camera.settings.shape.x, props.video[1].camera.settings.shape.y, 1);
 
 	// start single frame
 	ret = cpx_start(cpx);
