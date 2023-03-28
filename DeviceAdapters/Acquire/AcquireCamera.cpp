@@ -33,16 +33,14 @@
 /// Expands to `f("hello",5)`.
 #define SIZED(str) str, sizeof(str) - 1
 
-
 using namespace std;
-
 
 const char* cameraName = "AcquireCamera";
 AcquireCamera* AcquireCamera::g_instance = nullptr;
 const int DEMO_IMAGE_WIDTH = 640;
 const int DEMO_IMAGE_HEIGHT = 480;
 
-AcquireCamera::AcquireCamera() : initialized_(false)
+AcquireCamera::AcquireCamera() : initialized_(false), multiChannel(true), demo(true)
 {
 	CreateProperty(MM::g_Keyword_Name, cameraName, MM::String, true);
 
@@ -55,6 +53,8 @@ AcquireCamera::AcquireCamera() : initialized_(false)
 	// CameraID
 	CreateProperty(MM::g_Keyword_CameraID, "V1.0", MM::String, true);
 
+	// demo mode
+	CreateProperty(g_prop_Demo, "1", MM::Integer, true);
 }
 
 AcquireCamera::~AcquireCamera()
@@ -67,12 +67,25 @@ int AcquireCamera::Initialize()
 	if (initialized_)
 		return DEVICE_OK;
 
+	long demoVal;
+	GetProperty(g_prop_Demo, demoVal);
+	demo = demoVal == 1L ? true : false;
+
 	// binning
 	CreateProperty(MM::g_Keyword_Binning, "1", MM::Integer, false);
 
 	std::vector<std::string> binningValues;
 	binningValues.push_back("1");
 	SetAllowedValues(MM::g_Keyword_Binning, binningValues);
+
+	// mode
+	auto pAct = new CPropertyAction(this, &AcquireCamera::OnImageMode);
+	CreateProperty(g_prop_Mode, g_prop_Mode_Multi, MM::String, false, pAct);
+	AddAllowedValue(g_prop_Mode, g_prop_Mode_Multi);
+	AddAllowedValue(g_prop_Mode, g_prop_Mode_Single);
+	multiChannel = true; // default
+
+	setupBuffers();
 
 	// test cpx loading
 	g_instance = this;
@@ -86,27 +99,21 @@ int AcquireCamera::Initialize()
 
 	CpxProperties props = {};
 	int ret = getCpxProperties(props);
-	if (ret != DEVICE_OK)
+	if (ret != CpxStatus_Ok)
 		return ret;
 
 	// set up simulated cameras
 	ret = device_manager_select(dm, DeviceKind_Camera, SIZED("simulated.*random.*"), &props.video[0].camera.identifier);
-	if (ret != DEVICE_OK)
+	if (ret != CpxStatus_Ok)
 		return ret;
 
 	ret = device_manager_select(dm, DeviceKind_Camera, SIZED("simulated.*sin.*"), &props.video[1].camera.identifier);
-	if (ret != DEVICE_OK)
+	if (ret != CpxStatus_Ok)
 		return ret;
 
 
 	// we are assuming that cameras are identical
 	CreateProperty("LineIntervalUs", to_string(props.video[0].camera.settings.line_interval_us).c_str(), MM::Float, false);
-
-	//auto width = props.video[0].camera.settings.shape.x;
-	//auto height = props.video[0].camera.settings.shape.y;
-	imgs.resize(2); // two 8-bit images
-	imgs[0].Resize(DEMO_IMAGE_WIDTH, DEMO_IMAGE_HEIGHT, 1);
-	imgs[1].Resize(DEMO_IMAGE_WIDTH, DEMO_IMAGE_HEIGHT, 1);
 
 	initialized_ = true;
 	return DEVICE_OK;
@@ -116,7 +123,9 @@ int AcquireCamera::Shutdown()
 {
 	if (cpx)
 	{
-		cpx_shutdown(cpx);
+		auto ret = cpx_shutdown(cpx);
+		if (ret != CpxStatus_Ok)
+			LogMessage("cpx_shutdown error: " + ret);
 		cpx = nullptr;
 		g_instance = nullptr;
 	}
@@ -138,7 +147,7 @@ long AcquireCamera::GetImageBufferSize() const
 
 unsigned AcquireCamera::GetBitDepth() const
 {
-	return 8;
+	return imgs[0].Depth() * 8;
 }
 
 int AcquireCamera::GetBinning() const
@@ -242,7 +251,7 @@ unsigned AcquireCamera::GetImageHeight() const
 
 unsigned AcquireCamera::GetImageBytesPerPixel() const
 {
-	return 1;
+	return imgs[0].Depth();
 }
 
 int AcquireCamera::SnapImage()
@@ -272,13 +281,13 @@ int AcquireCamera::SnapImage()
 		&props.video[1].storage.identifier);
 
 	props.video[0].camera.settings.binning = 1;
-	props.video[0].camera.settings.pixel_type = SampleType_u8;
-	props.video[0].camera.settings.shape = {DEMO_IMAGE_WIDTH, DEMO_IMAGE_HEIGHT};
+	props.video[0].camera.settings.pixel_type = imgs[0].Depth() == 2 ? SampleType_u16 : SampleType_u8;
+	props.video[0].camera.settings.shape = {imgs[0].Width(), imgs[0].Height()};
 	props.video[0].max_frame_count = 1;
 
 	props.video[1].camera.settings.binning = 1;
-	props.video[1].camera.settings.pixel_type = SampleType_u8;
-	props.video[1].camera.settings.shape = {DEMO_IMAGE_WIDTH, DEMO_IMAGE_HEIGHT};
+	props.video[1].camera.settings.pixel_type = imgs[0].Depth() == 2 ? SampleType_u16 : SampleType_u8;
+	props.video[1].camera.settings.shape = { imgs[0].Width(), imgs[0].Height() };
 	props.video[1].max_frame_count = 1;
 
 	int ret = cpx_configure(cpx, &props);
@@ -288,16 +297,12 @@ int AcquireCamera::SnapImage()
 		return ERR_CPX_CONFIURE_FAILED;
 	}
 
-	imgs[0].Resize(props.video[0].camera.settings.shape.x, props.video[0].camera.settings.shape.y, 1);
-	imgs[1].Resize(props.video[1].camera.settings.shape.x, props.video[1].camera.settings.shape.y, 1);
-
 	// start single frame
 	ret = cpx_start(cpx);
 	if (ret != CpxStatus_Ok)
 		throw std::exception("cpx_start failed");
 
-	readFrame(0, props);
-	readFrame(1, props);
+	readFrames(props);
 
 	cpx_stop(cpx);
 
@@ -356,7 +361,6 @@ int AcquireCamera::readFrame(int stream, CpxProperties& props)
 
 	// resize buffer
 	const int pixelSizeBytes = 1; // TODO: this has to be variable depending on the pixel type
-	const int frameSize = props.video[0].camera.settings.shape.x * props.video[0].camera.settings.shape.y * pixelSizeBytes;
 
 	VideoFrame* beg, * end;
 	cpx_map_read(cpx, stream, &beg, &end);
@@ -366,11 +370,107 @@ int AcquireCamera::readFrame(int stream, CpxProperties& props)
 		std::this_thread::sleep_for(std::chrono::milliseconds(10));
 		// TODO: timeout
 	}
-	assert(beg->shape.dims.width == props.video[0].camera.settings.shape.x);
-	assert(beg->shape.dims.height == props.video[0].camera.settings.shape.y);
 	memcpy(imgs[stream].GetPixelsRW(), beg->data, beg->bytes_of_frame - sizeof(VideoFrame));
 	uint32_t n = (uint32_t) consumed_bytes(beg, end);
 	cpx_unmap_read(cpx, stream, n);
 
 	return 0;
+}
+
+int AcquireCamera::readFrames(CpxProperties& props)
+{
+	const auto next = [](VideoFrame* cur) -> VideoFrame* {
+		return (VideoFrame*)(((uint8_t*)cur) + cur->bytes_of_frame);
+	};
+
+	const auto consumed_bytes = [](const VideoFrame* const cur,
+		const VideoFrame* const end) -> size_t {
+			return (uint8_t*)end - (uint8_t*)cur;
+	};
+
+	VideoFrame* beg, * end;
+	// read first frame and place it in the first image buffer
+	cpx_map_read(cpx, 0, &beg, &end);
+	while (beg == end)
+	{
+		cpx_map_read(cpx, 0, &beg, &end);
+		std::this_thread::sleep_for(std::chrono::milliseconds(5));
+	}
+	memcpy(imgs[0].GetPixelsRW(), beg->data, beg->bytes_of_frame - sizeof(VideoFrame));
+	uint32_t n = (uint32_t)consumed_bytes(beg, end);
+	cpx_unmap_read(cpx, 0, n);
+
+	// read second frame and place it in the second buffer or append to the first
+	// depending on the multiChannel flag
+	cpx_map_read(cpx, 1, &beg, &end);
+	while (beg == end)
+	{
+		cpx_map_read(cpx, 1, &beg, &end);
+		std::this_thread::sleep_for(std::chrono::milliseconds(5));
+	}
+	if (multiChannel)
+		memcpy(imgs[1].GetPixelsRW(), beg->data, beg->bytes_of_frame - sizeof(VideoFrame));
+	else
+		memcpy(imgs[0].GetPixelsRW() + (uintptr_t)imgs[0].Width() * imgs[0].Height() * imgs[0].Depth() / 2,
+				beg->data, beg->bytes_of_frame - sizeof(VideoFrame));
+
+	n = (uint32_t)consumed_bytes(beg, end);
+	cpx_unmap_read(cpx, 1, n);
+
+	return 0;
+}
+
+void AcquireCamera::setupBuffers()
+{
+	// TODO: obtain pixel depth
+	const int pixDepth = 1;
+	if (demo)
+	{
+		imgs.clear();
+		if (multiChannel)
+		{
+			imgs.resize(2); // two images
+			imgs[0].Resize(DEMO_IMAGE_WIDTH, DEMO_IMAGE_HEIGHT, pixDepth);
+			imgs[1].Resize(DEMO_IMAGE_WIDTH, DEMO_IMAGE_HEIGHT, pixDepth);
+		}
+		else
+		{
+			imgs.resize(1); // single image
+			imgs[0].Resize(DEMO_IMAGE_WIDTH, DEMO_IMAGE_HEIGHT * 2, pixDepth);
+		}
+	}
+	else
+	{
+		// TODO
+	}
+
+}
+
+
+//////////////////////////////////////////////////////////////////////////////////////////////
+// Property Handlers
+//////////////////////////////////////////////////////////////////////////////////////////////
+int AcquireCamera::OnImageMode(MM::PropertyBase* pProp, MM::ActionType eAct)
+{
+	if (eAct == MM::BeforeGet)
+	{
+		pProp->Set(multiChannel ? g_prop_Mode_Multi : g_prop_Mode_Single);
+	}
+	else if (eAct == MM::AfterSet)
+	{
+		string mode;
+		pProp->Get(mode);
+		if (mode.compare(g_prop_Mode_Multi) == 0)
+		{
+			multiChannel = true;
+		}
+		else
+		{
+			multiChannel = false;
+		}
+
+		setupBuffers();
+	}
+
+	return DEVICE_OK;
 }

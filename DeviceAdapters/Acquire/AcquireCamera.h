@@ -32,6 +32,11 @@
 #define ERR_CPX_INIT 90001
 #define ERR_CPX_CONFIURE_FAILED 90002
 
+static const char* g_prop_Mode = "ImageMode";
+static const char* g_prop_Mode_Multi = "MultiChannel";
+static const char* g_prop_Mode_Single = "SingleChannel";
+static const char* g_prop_Demo = "SingleChannel";
+
 extern const char* cameraName;
 struct CpxRuntime;
 struct CpxProperties;
@@ -68,14 +73,22 @@ public:
 	unsigned GetNumberOfChannels() const;
 	int GetChannelName(unsigned channel, char* name);
 
+	// property handlers
+	int OnImageMode(MM::PropertyBase* pProp, MM::ActionType eAct);
+
+
 private:
 	bool initialized_;
 	static AcquireCamera* g_instance;
 	CpxRuntime* cpx;
 	std::vector<ImgBuffer> imgs;
+	bool multiChannel;
+	bool demo;
 
 	int getCpxProperties(CpxProperties& props) const;
 	int setCpxProperties(CpxProperties& props);
 	static void reporter(int is_error, const char* file, int line, const char* function, const char* msg);
 	int readFrame(int stream, CpxProperties& props);
+	int readFrames(CpxProperties& props);
+	void setupBuffers();
 };
