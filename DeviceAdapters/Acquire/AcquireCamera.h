@@ -35,7 +35,9 @@
 static const char* g_prop_Mode = "ImageMode";
 static const char* g_prop_Mode_Multi = "MultiChannel";
 static const char* g_prop_Mode_Single = "SingleChannel";
-static const char* g_prop_Demo = "SingleChannel";
+static const char* g_prop_Hardware = "CameraHardware";
+static const char* g_prop_Hardware_Demo = "Demo";
+static const char* g_prop_Hardware_Hamamatsu = "Hamamatsu";
 
 extern const char* cameraName;
 struct CpxRuntime;
@@ -75,6 +77,8 @@ public:
 
 	// property handlers
 	int OnImageMode(MM::PropertyBase* pProp, MM::ActionType eAct);
+	int OnHardware(MM::PropertyBase* pProp, MM::ActionType eAct);
+
 
 
 private:

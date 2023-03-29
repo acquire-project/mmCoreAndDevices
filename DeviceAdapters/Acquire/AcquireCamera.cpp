@@ -54,7 +54,10 @@ AcquireCamera::AcquireCamera() : initialized_(false), multiChannel(true), demo(t
 	CreateProperty(MM::g_Keyword_CameraID, "V1.0", MM::String, true);
 
 	// demo mode
-	CreateProperty(g_prop_Demo, "1", MM::Integer, true);
+	auto pAct = new CPropertyAction(this, &AcquireCamera::OnHardware);
+	CreateProperty(g_prop_Hardware, g_prop_Hardware_Demo, MM::String, false, nullptr, true);
+	AddAllowedValue(g_prop_Hardware, g_prop_Hardware_Demo);
+	AddAllowedValue(g_prop_Hardware, g_prop_Hardware_Hamamatsu);
 }
 
 AcquireCamera::~AcquireCamera()
@@ -66,10 +69,6 @@ int AcquireCamera::Initialize()
 {
 	if (initialized_)
 		return DEVICE_OK;
-
-	long demoVal;
-	GetProperty(g_prop_Demo, demoVal);
-	demo = demoVal == 1L ? true : false;
 
 	// binning
 	CreateProperty(MM::g_Keyword_Binning, "1", MM::Integer, false);
@@ -470,6 +469,29 @@ int AcquireCamera::OnImageMode(MM::PropertyBase* pProp, MM::ActionType eAct)
 		}
 
 		setupBuffers();
+	}
+
+	return DEVICE_OK;
+}
+
+int AcquireCamera::OnHardware(MM::PropertyBase* pProp, MM::ActionType eAct)
+{
+	if (eAct == MM::BeforeGet)
+	{
+		pProp->Set(demo ? g_prop_Hardware_Demo : g_prop_Hardware_Hamamatsu);
+	}
+	else if (eAct == MM::AfterSet)
+	{
+		string hw;
+		pProp->Get(hw);
+		if (hw.compare(g_prop_Hardware_Demo) == 0)
+		{
+			demo = true;
+		}
+		else
+		{
+			demo = false;
+		}
 	}
 
 	return DEVICE_OK;
