@@ -42,6 +42,28 @@ const int DEMO_IMAGE_HEIGHT = 480;
 
 AcquireCamera::AcquireCamera() : initialized_(false), multiChannel(true), demo(true)
 {
+	// instantiate cpx
+	g_instance = this;
+	cpx = cpx_init(AcquireCamera::reporter);
+	auto dm = cpx_device_manager(cpx);
+	if (!cpx || !dm)
+	{
+		g_instance = nullptr;
+		LogMessage("CPX inistialize failed");
+		return;
+	}
+
+	for (uint32_t i = 0; i < device_manager_count(dm); ++i) {
+		struct DeviceIdentifier identifier = {};
+		CHECK(Device_Ok == device_manager_get(&identifier, device_manager, i));
+		CHECK(identifier.kind < DeviceKind_Count);
+		printf("%3d - %10s %s\n",
+			(int)i,
+			device_kind_as_string(identifier.kind),
+			identifier.name);
+	}
+
+
 	CreateProperty(MM::g_Keyword_Name, cameraName, MM::String, true);
 
 	// Description
@@ -109,7 +131,6 @@ int AcquireCamera::Initialize()
 	ret = device_manager_select(dm, DeviceKind_Camera, SIZED("simulated.*sin.*"), &props.video[1].camera.identifier);
 	if (ret != CpxStatus_Ok)
 		return ret;
-
 
 	// we are assuming that cameras are identical
 	CreateProperty("LineIntervalUs", to_string(props.video[0].camera.settings.line_interval_us).c_str(), MM::Float, false);
@@ -408,10 +429,14 @@ int AcquireCamera::readFrames(CpxProperties& props)
 		std::this_thread::sleep_for(std::chrono::milliseconds(5));
 	}
 	if (multiChannel)
+	{
 		memcpy(imgs[1].GetPixelsRW(), beg->data, beg->bytes_of_frame - sizeof(VideoFrame));
+	}
 	else
-		memcpy(imgs[0].GetPixelsRW() + (uintptr_t)imgs[0].Width() * imgs[0].Height() * imgs[0].Depth() / 2,
-				beg->data, beg->bytes_of_frame - sizeof(VideoFrame));
+	{
+		memcpy(imgs[0].GetPixelsRW() + imgs[0].Width() * imgs[0].Height() / 2 * imgs[0].Depth(),
+			beg->data, beg->bytes_of_frame - sizeof(VideoFrame));
+	}
 
 	n = (uint32_t)consumed_bytes(beg, end);
 	cpx_unmap_read(cpx, 1, n);
