@@ -31,6 +31,8 @@
 #define ERR_INVALID_DEVICE_NAME 90000
 #define ERR_CPX_INIT 90001
 #define ERR_CPX_CONFIURE_FAILED 90002
+#define ERR_UNSUPPORTED_PIXEL_TYPE 90003
+#define ERR_INVALID_CAMERA_SELECTION 90004
 
 static const char* g_prop_Mode = "ImageMode";
 static const char* g_prop_Mode_Multi = "MultiChannel";
@@ -38,6 +40,9 @@ static const char* g_prop_Mode_Single = "SingleChannel";
 static const char* g_prop_Hardware = "CameraHardware";
 static const char* g_prop_Hardware_Demo = "Demo";
 static const char* g_prop_Hardware_Hamamatsu = "Hamamatsu";
+static const char* g_prop_Camera_1 = "Camera_1";
+static const char* g_prop_Camera_2 = "Camera_2";
+static const char* g_Camera_None = "None";
 
 extern const char* cameraName;
 struct CpxRuntime;
@@ -76,23 +81,22 @@ public:
 	int GetChannelName(unsigned channel, char* name);
 
 	// property handlers
-	int OnImageMode(MM::PropertyBase* pProp, MM::ActionType eAct);
 	int OnHardware(MM::PropertyBase* pProp, MM::ActionType eAct);
-
-
 
 private:
 	bool initialized_;
 	static AcquireCamera* g_instance;
 	CpxRuntime* cpx;
 	std::vector<ImgBuffer> imgs;
-	bool multiChannel;
 	bool demo;
+	std::string camera1;
+	std::string camera2;
 
 	int getCpxProperties(CpxProperties& props) const;
 	int setCpxProperties(CpxProperties& props);
 	static void reporter(int is_error, const char* file, int line, const char* function, const char* msg);
 	int readFrame(int stream, CpxProperties& props);
 	int readFrames(CpxProperties& props);
-	void setupBuffers();
+	void setupBuffers(unsigned width, unsigned height, unsigned depth, bool dual);
+	bool isDual() { return camera2.compare(g_Camera_None) != 0; }
 };

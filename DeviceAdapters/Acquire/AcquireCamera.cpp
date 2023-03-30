@@ -39,8 +39,9 @@ const char* cameraName = "AcquireCamera";
 AcquireCamera* AcquireCamera::g_instance = nullptr;
 const int DEMO_IMAGE_WIDTH = 640;
 const int DEMO_IMAGE_HEIGHT = 480;
+const int DEMO_IMAGE_DEPTH = 1;
 
-AcquireCamera::AcquireCamera() : initialized_(false), multiChannel(true), demo(true)
+AcquireCamera::AcquireCamera() : initialized_(false), demo(true)
 {
 	// instantiate cpx
 	g_instance = this;
@@ -53,16 +54,17 @@ AcquireCamera::AcquireCamera() : initialized_(false), multiChannel(true), demo(t
 		return;
 	}
 
+	vector<string> devices;
+	devices.push_back(g_Camera_None);
 	for (uint32_t i = 0; i < device_manager_count(dm); ++i) {
 		struct DeviceIdentifier identifier = {};
-		CHECK(Device_Ok == device_manager_get(&identifier, device_manager, i));
-		CHECK(identifier.kind < DeviceKind_Count);
-		printf("%3d - %10s %s\n",
-			(int)i,
-			device_kind_as_string(identifier.kind),
-			identifier.name);
+		int ret = device_manager_get(&identifier, dm, i);
+		if (ret != CpxStatus_Ok) {
+			LogMessage("cpx failed getting device identifier");
+		}
+		if (identifier.kind == DeviceKind_Camera)
+			devices.push_back(identifier.name);
 	}
-
 
 	CreateProperty(MM::g_Keyword_Name, cameraName, MM::String, true);
 
@@ -75,11 +77,11 @@ AcquireCamera::AcquireCamera() : initialized_(false), multiChannel(true), demo(t
 	// CameraID
 	CreateProperty(MM::g_Keyword_CameraID, "V1.0", MM::String, true);
 
-	// demo mode
-	auto pAct = new CPropertyAction(this, &AcquireCamera::OnHardware);
-	CreateProperty(g_prop_Hardware, g_prop_Hardware_Demo, MM::String, false, nullptr, true);
-	AddAllowedValue(g_prop_Hardware, g_prop_Hardware_Demo);
-	AddAllowedValue(g_prop_Hardware, g_prop_Hardware_Hamamatsu);
+	// device
+	CreateProperty(g_prop_Camera_1, devices.size() ? devices[0].c_str() : g_Camera_None, MM::String, false, nullptr, true);
+	SetAllowedValues(g_prop_Camera_1, devices);
+	CreateProperty(g_prop_Camera_2, devices.size() ? devices[0].c_str() : g_Camera_None, MM::String, false, nullptr, true);
+	SetAllowedValues(g_prop_Camera_2, devices);
 }
 
 AcquireCamera::~AcquireCamera()
@@ -92,21 +94,37 @@ int AcquireCamera::Initialize()
 	if (initialized_)
 		return DEVICE_OK;
 
+	// cameras
+	char val[MM::MaxStrLength];
+	GetProperty(g_prop_Camera_1, val);
+	camera1 = val;
+
+	GetProperty(g_prop_Camera_2, val);
+	camera2 = val;
+
+	// if we are using simulated cameras, then we are in demo mode
+	// TODO: make sure "demo" flag is necessary
+	if (camera1.compare(camera2) == 0)
+		return ERR_INVALID_CAMERA_SELECTION;
+
+	if (camera1.compare(g_Camera_None) == 0)
+		return ERR_INVALID_CAMERA_SELECTION;
+
+	if (camera1.rfind("simulated", 0) == 0) {
+		if (camera2.compare(g_Camera_None) != 0 && camera2.rfind("simulated", 0) != 0)
+			return ERR_INVALID_CAMERA_SELECTION; // both cameras must be simulated
+
+		demo = true;
+	}
+	else
+		demo = false;
+
 	// binning
 	CreateProperty(MM::g_Keyword_Binning, "1", MM::Integer, false);
 
 	std::vector<std::string> binningValues;
 	binningValues.push_back("1");
 	SetAllowedValues(MM::g_Keyword_Binning, binningValues);
-
-	// mode
-	auto pAct = new CPropertyAction(this, &AcquireCamera::OnImageMode);
-	CreateProperty(g_prop_Mode, g_prop_Mode_Multi, MM::String, false, pAct);
-	AddAllowedValue(g_prop_Mode, g_prop_Mode_Multi);
-	AddAllowedValue(g_prop_Mode, g_prop_Mode_Single);
-	multiChannel = true; // default
-
-	setupBuffers();
 
 	// test cpx loading
 	g_instance = this;
@@ -123,14 +141,56 @@ int AcquireCamera::Initialize()
 	if (ret != CpxStatus_Ok)
 		return ret;
 
-	// set up simulated cameras
-	ret = device_manager_select(dm, DeviceKind_Camera, SIZED("simulated.*random.*"), &props.video[0].camera.identifier);
+	ret = device_manager_select(dm, DeviceKind_Camera, camera1.c_str(), camera1.size(), &props.video[0].camera.identifier);
+	if (ret != CpxStatus_Ok)
+		return ret;
+	
+	if (isDual())
+	{
+		ret = device_manager_select(dm, DeviceKind_Camera, camera2.c_str(), camera2.size(), &props.video[1].camera.identifier);
+		if (ret != CpxStatus_Ok)
+			return ret;
+	}
+
+	// disable storage
+	device_manager_select(dm,
+		DeviceKind_Storage,
+		SIZED("Trash"),
+		&props.video[0].storage.identifier);
+
+	device_manager_select(dm,
+		DeviceKind_Storage,
+		SIZED("Trash"),
+		&props.video[1].storage.identifier);
+
+	if (demo)
+	{
+		props.video[0].camera.settings.binning = 1;
+		props.video[0].camera.settings.pixel_type = DEMO_IMAGE_DEPTH == 2 ? SampleType_u16 : SampleType_u8;
+		props.video[0].camera.settings.shape = { DEMO_IMAGE_WIDTH, DEMO_IMAGE_HEIGHT };
+		props.video[0].max_frame_count = 1;
+
+		if (isDual())
+		{
+			props.video[1].camera.settings.binning = 1;
+			props.video[1].camera.settings.pixel_type = DEMO_IMAGE_DEPTH == 2 ? SampleType_u16 : SampleType_u8;
+			props.video[1].camera.settings.shape = { DEMO_IMAGE_WIDTH, DEMO_IMAGE_HEIGHT };
+			props.video[1].max_frame_count = 1;
+		}
+	}
+	// TODO: what if not demo???
+
+	ret = cpx_configure(cpx, &props);
 	if (ret != CpxStatus_Ok)
 		return ret;
 
-	ret = device_manager_select(dm, DeviceKind_Camera, SIZED("simulated.*sin.*"), &props.video[1].camera.identifier);
-	if (ret != CpxStatus_Ok)
-		return ret;
+	if (props.video[0].camera.settings.pixel_type > 1)
+	{
+		LogMessage("Acquire MM adapter does not support device pixel type");
+		return ERR_UNSUPPORTED_PIXEL_TYPE;
+	}
+
+	setupBuffers(props.video[0].camera.settings.shape.x, props.video[0].camera.settings.shape.y, props.video[0].camera.settings.pixel_type + 1, isDual());
 
 	// we are assuming that cameras are identical
 	CreateProperty("LineIntervalUs", to_string(props.video[0].camera.settings.line_interval_us).c_str(), MM::Float, false);
@@ -280,35 +340,12 @@ int AcquireCamera::SnapImage()
 	getCpxProperties(props);
 	auto dm = cpx_device_manager(cpx);
 
-	device_manager_select(dm,
-		DeviceKind_Camera,
-		SIZED("simulated.*random.*"),
-		&props.video[0].camera.identifier);
-
-	device_manager_select(dm,
-		DeviceKind_Camera,
-		SIZED("simulated.*sin.*"),
-		&props.video[1].camera.identifier);
-
-	device_manager_select(dm,
-		DeviceKind_Storage,
-		SIZED("Trash"),
-		&props.video[0].storage.identifier);
-
-	device_manager_select(dm,
-		DeviceKind_Storage,
-		SIZED("Trash"),
-		&props.video[1].storage.identifier);
-
-	props.video[0].camera.settings.binning = 1;
-	props.video[0].camera.settings.pixel_type = imgs[0].Depth() == 2 ? SampleType_u16 : SampleType_u8;
-	props.video[0].camera.settings.shape = {imgs[0].Width(), imgs[0].Height()};
+	// make sure we are acquiring only one frame
 	props.video[0].max_frame_count = 1;
-
-	props.video[1].camera.settings.binning = 1;
-	props.video[1].camera.settings.pixel_type = imgs[0].Depth() == 2 ? SampleType_u16 : SampleType_u8;
-	props.video[1].camera.settings.shape = { imgs[0].Width(), imgs[0].Height() };
-	props.video[1].max_frame_count = 1;
+	if (isDual())
+	{
+		props.video[1].max_frame_count = 1;
+	}
 
 	int ret = cpx_configure(cpx, &props);
 	if (ret != CpxStatus_Ok)
@@ -420,84 +457,41 @@ int AcquireCamera::readFrames(CpxProperties& props)
 	uint32_t n = (uint32_t)consumed_bytes(beg, end);
 	cpx_unmap_read(cpx, 0, n);
 
-	// read second frame and place it in the second buffer or append to the first
-	// depending on the multiChannel flag
-	cpx_map_read(cpx, 1, &beg, &end);
-	while (beg == end)
-	{
+	// read second frame
+	if (imgs.size() > 1) {
 		cpx_map_read(cpx, 1, &beg, &end);
-		std::this_thread::sleep_for(std::chrono::milliseconds(5));
-	}
-	if (multiChannel)
-	{
+		while (beg == end)
+		{
+			cpx_map_read(cpx, 1, &beg, &end);
+			std::this_thread::sleep_for(std::chrono::milliseconds(5));
+		}
 		memcpy(imgs[1].GetPixelsRW(), beg->data, beg->bytes_of_frame - sizeof(VideoFrame));
+		n = (uint32_t)consumed_bytes(beg, end);
+		cpx_unmap_read(cpx, 1, n);
 	}
-	else
-	{
-		memcpy(imgs[0].GetPixelsRW() + imgs[0].Width() * imgs[0].Height() / 2 * imgs[0].Depth(),
-			beg->data, beg->bytes_of_frame - sizeof(VideoFrame));
-	}
-
-	n = (uint32_t)consumed_bytes(beg, end);
-	cpx_unmap_read(cpx, 1, n);
 
 	return 0;
 }
 
-void AcquireCamera::setupBuffers()
+void AcquireCamera::setupBuffers(unsigned width, unsigned height, unsigned depth, bool dual)
 {
-	// TODO: obtain pixel depth
-	const int pixDepth = 1;
-	if (demo)
+	imgs.clear();
+	if (dual)
 	{
-		imgs.clear();
-		if (multiChannel)
-		{
-			imgs.resize(2); // two images
-			imgs[0].Resize(DEMO_IMAGE_WIDTH, DEMO_IMAGE_HEIGHT, pixDepth);
-			imgs[1].Resize(DEMO_IMAGE_WIDTH, DEMO_IMAGE_HEIGHT, pixDepth);
-		}
-		else
-		{
-			imgs.resize(1); // single image
-			imgs[0].Resize(DEMO_IMAGE_WIDTH, DEMO_IMAGE_HEIGHT * 2, pixDepth);
-		}
+		imgs.resize(2); // two images
+		imgs[0].Resize(width, height, depth);
+		imgs[1].Resize(width, height, depth);
 	}
 	else
 	{
-		// TODO
+		imgs.resize(1); // single image
+		imgs[0].Resize(width, height, depth);
 	}
-
 }
-
 
 //////////////////////////////////////////////////////////////////////////////////////////////
 // Property Handlers
 //////////////////////////////////////////////////////////////////////////////////////////////
-int AcquireCamera::OnImageMode(MM::PropertyBase* pProp, MM::ActionType eAct)
-{
-	if (eAct == MM::BeforeGet)
-	{
-		pProp->Set(multiChannel ? g_prop_Mode_Multi : g_prop_Mode_Single);
-	}
-	else if (eAct == MM::AfterSet)
-	{
-		string mode;
-		pProp->Get(mode);
-		if (mode.compare(g_prop_Mode_Multi) == 0)
-		{
-			multiChannel = true;
-		}
-		else
-		{
-			multiChannel = false;
-		}
-
-		setupBuffers();
-	}
-
-	return DEVICE_OK;
-}
 
 int AcquireCamera::OnHardware(MM::PropertyBase* pProp, MM::ActionType eAct)
 {
