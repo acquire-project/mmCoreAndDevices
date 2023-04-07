@@ -18,12 +18,18 @@
     <ClInclude Include="AcquireCamera.h">
       <Filter>Header Files</Filter>
     </ClInclude>
+    <ClInclude Include="SequenceThread.h">
+      <Filter>Header Files</Filter>
+    </ClInclude>
   </ItemGroup>
   <ItemGroup>
     <ClCompile Include="AcquireModule.cpp">
       <Filter>Source Files</Filter>
     </ClCompile>
     <ClCompile Include="AcquireCamera.cpp">
+      <Filter>Source Files</Filter>
+    </ClCompile>
+    <ClCompile Include="SequenceThread.cpp">
       <Filter>Source Files</Filter>
     </ClCompile>
   </ItemGroup>

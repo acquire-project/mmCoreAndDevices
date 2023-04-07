@@ -1,5 +1,5 @@
 ///////////////////////////////////////////////////////////////////////////////
-// FILE:          DualCamera.h
+// FILE:          AcquireCamera.h
 // PROJECT:       Micro-Manager
 // SUBSYSTEM:     DeviceAdapters
 //-----------------------------------------------------------------------------
@@ -27,12 +27,14 @@
 #include "DeviceBase.h"
 #include "ImgBuffer.h"
 
-#define ERR_WRONG
 #define ERR_INVALID_DEVICE_NAME 90000
 #define ERR_CPX_INIT 90001
 #define ERR_CPX_CONFIURE_FAILED 90002
 #define ERR_UNSUPPORTED_PIXEL_TYPE 90003
 #define ERR_INVALID_CAMERA_SELECTION 90004
+#define ERR_UNKNOWN_LIVE 90005
+#define ERR_TIMEOUT 90006
+#define ERR_CPX_MISSED_FRAME 90007
 
 static const char* g_prop_Mode = "ImageMode";
 static const char* g_prop_Mode_Multi = "MultiChannel";
@@ -47,12 +49,15 @@ static const char* g_Camera_None = "None";
 extern const char* cameraName;
 struct CpxRuntime;
 struct CpxProperties;
+class SequenceThread;
 
 class AcquireCamera : public CCameraBase<AcquireCamera>
 {
 public:
 	AcquireCamera();
 	~AcquireCamera();
+
+	friend class SequenceThread;
 
 	// Inherited via CCameraBase
 	int Initialize();
@@ -76,6 +81,7 @@ public:
 	int SnapImage();
 	int StartSequenceAcquisition(long numImages, double interval_ms, bool stopOnOverflow);
 	int StopSequenceAcquisition();
+	bool IsCapturing();
 	unsigned GetNumberOfComponents() const;
 	unsigned GetNumberOfChannels() const;
 	int GetChannelName(unsigned channel, char* name);
@@ -91,12 +97,14 @@ private:
 	bool demo;
 	std::string camera1;
 	std::string camera2;
+	SequenceThread* liveThread;
+	bool stopOnOverflow;
 
 	int getCpxProperties(CpxProperties& props) const;
 	int setCpxProperties(CpxProperties& props);
 	static void reporter(int is_error, const char* file, int line, const char* function, const char* msg);
-	int readFrame(int stream, CpxProperties& props);
-	int readFrames(CpxProperties& props);
+	int readSnapImageFrames();
+	int readLiveFrames(int& framesRead);
 	void setupBuffers(unsigned width, unsigned height, unsigned depth, bool dual);
 	bool isDual() { return camera2.compare(g_Camera_None) != 0; }
 };

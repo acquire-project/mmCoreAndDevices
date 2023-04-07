@@ -26,6 +26,7 @@
 #include <sstream>
 #include <chrono>
 #include <thread>
+#include "SequenceThread.h"
 
 
 /// Helper for passing size static strings as function args.
@@ -41,7 +42,18 @@ const int DEMO_IMAGE_WIDTH = 640;
 const int DEMO_IMAGE_HEIGHT = 480;
 const int DEMO_IMAGE_DEPTH = 1;
 
-AcquireCamera::AcquireCamera() : initialized_(false), demo(true)
+const VideoFrame* next(VideoFrame* cur)
+{
+	return (VideoFrame*)(((uint8_t*)cur) + cur->bytes_of_frame);
+}
+
+size_t ConsumedBytes (const VideoFrame* const cur, const VideoFrame* const end)
+{
+		return (uint8_t*)end - (uint8_t*)cur;
+};
+
+
+AcquireCamera::AcquireCamera() : initialized_(false), demo(true), stopOnOverflow(false)
 {
 	// instantiate cpx
 	g_instance = this;
@@ -82,11 +94,14 @@ AcquireCamera::AcquireCamera() : initialized_(false), demo(true)
 	SetAllowedValues(g_prop_Camera_1, devices);
 	CreateProperty(g_prop_Camera_2, devices.size() ? devices[0].c_str() : g_Camera_None, MM::String, false, nullptr, true);
 	SetAllowedValues(g_prop_Camera_2, devices);
+
+	liveThread = new SequenceThread(this);
 }
 
 AcquireCamera::~AcquireCamera()
 {
 	Shutdown();
+	delete liveThread;
 }
 
 int AcquireCamera::Initialize()
@@ -201,6 +216,9 @@ int AcquireCamera::Initialize()
 
 int AcquireCamera::Shutdown()
 {
+	liveThread->Stop();
+	liveThread->wait();
+
 	if (cpx)
 	{
 		auto ret = cpx_shutdown(cpx);
@@ -246,8 +264,26 @@ void AcquireCamera::SetExposure(double exposure)
 	int ret = getCpxProperties(props);
 	if (ret != DEVICE_OK)
 		LogMessage("Error obtaining properties: code=" + ret);
+
+	auto dm = cpx_device_manager(cpx);
+
+	ret = device_manager_select(dm, DeviceKind_Camera, camera1.c_str(), camera1.size(), &props.video[0].camera.identifier);
+	if (ret != CpxStatus_Ok)
+	{
+		LogMessage("CPX Select 1 failed");
+	}
+
+	if (isDual())
+	{
+		ret = device_manager_select(dm, DeviceKind_Camera, camera2.c_str(), camera2.size(), &props.video[1].camera.identifier);
+		if (ret != CpxStatus_Ok)
+			LogMessage("CPX Select 2 failed");
+	}
+
 	props.video[0].camera.settings.exposure_time_us = (float)(exposure * 1000);
-	props.video[1].camera.settings.exposure_time_us = props.video[0].camera.settings.exposure_time_us;
+	if (isDual())
+		props.video[1].camera.settings.exposure_time_us = props.video[0].camera.settings.exposure_time_us;
+
 	ret = setCpxProperties(props);
 	if (ret != DEVICE_OK)
 		LogMessage("Error setting exposure: code=" + ret);
@@ -359,21 +395,65 @@ int AcquireCamera::SnapImage()
 	if (ret != CpxStatus_Ok)
 		throw std::exception("cpx_start failed");
 
-	readFrames(props);
-
+	ret = readSnapImageFrames();
 	cpx_stop(cpx);
+	
+	if (ret != DEVICE_OK)
+		return ret;
 
 	return DEVICE_OK;
 }
 
 int AcquireCamera::StartSequenceAcquisition(long numImages, double interval_ms, bool stopOnOverflow)
 {
-	return CCameraBase::StartSequenceAcquisition(numImages, interval_ms, stopOnOverflow);
+	if (IsCapturing())
+		return DEVICE_CAMERA_BUSY_ACQUIRING;
+	
+	int ret = GetCoreCallback()->PrepareForAcq(this);
+	if (ret != DEVICE_OK)
+		return ret;
+
+
+	CpxProperties props = {};
+	getCpxProperties(props);
+	auto dm = cpx_device_manager(cpx);
+
+	props.video[0].max_frame_count = numImages == 0 ? MAXUINT64 : numImages;
+	if (isDual())
+	{
+		props.video[1].max_frame_count = numImages == 0 ? MAXUINT64 : numImages;
+	}
+
+	ret = cpx_configure(cpx, &props);
+	if (ret != CpxStatus_Ok)
+	{
+		LogMessage("cpx_configure failed");
+		return ERR_CPX_CONFIURE_FAILED;
+	}
+
+	ret = cpx_start(cpx);
+	if (ret != CpxStatus_Ok)
+		return ret;
+
+	this->stopOnOverflow = stopOnOverflow;
+	liveThread->Start(numImages, interval_ms);
+	return DEVICE_OK;
 }
 
 int AcquireCamera::StopSequenceAcquisition()
 {
-	return CCameraBase::StopSequenceAcquisition();
+	liveThread->Stop();
+	liveThread->wait();
+	int ret = cpx_abort(cpx);
+	if (ret != CpxStatus_Ok)
+		return ret;
+
+	return DEVICE_OK;
+}
+
+bool AcquireCamera::IsCapturing()
+{
+	return liveThread->IsActive();
 }
 
 int AcquireCamera::getCpxProperties(CpxProperties& props) const
@@ -405,73 +485,141 @@ void AcquireCamera::reporter(int is_error, const char* file, int line, const cha
 	}
 }
 
-int AcquireCamera::readFrame(int stream, CpxProperties& props)
+// read one frame from each camera and place it in the image buffer
+// for use with snapImage()
+int AcquireCamera::readSnapImageFrames()
 {
-	const auto next = [](VideoFrame* cur) -> VideoFrame* {
-		return (VideoFrame*)(((uint8_t*)cur) + cur->bytes_of_frame);
-	};
-
-	const auto consumed_bytes = [](const VideoFrame* const cur,
-		const VideoFrame* const end) -> size_t {
-			return (uint8_t*)end - (uint8_t*)cur;
-	};
-
-	// resize buffer
-	const int pixelSizeBytes = 1; // TODO: this has to be variable depending on the pixel type
-
-	VideoFrame* beg, * end;
-	cpx_map_read(cpx, stream, &beg, &end);
-	while (beg == end)
-	{
-		cpx_map_read(cpx, stream, &beg, &end);
-		std::this_thread::sleep_for(std::chrono::milliseconds(10));
-		// TODO: timeout
-	}
-	memcpy(imgs[stream].GetPixelsRW(), beg->data, beg->bytes_of_frame - sizeof(VideoFrame));
-	uint32_t n = (uint32_t) consumed_bytes(beg, end);
-	cpx_unmap_read(cpx, stream, n);
-
-	return 0;
-}
-
-int AcquireCamera::readFrames(CpxProperties& props)
-{
-	const auto next = [](VideoFrame* cur) -> VideoFrame* {
-		return (VideoFrame*)(((uint8_t*)cur) + cur->bytes_of_frame);
-	};
-
-	const auto consumed_bytes = [](const VideoFrame* const cur,
-		const VideoFrame* const end) -> size_t {
-			return (uint8_t*)end - (uint8_t*)cur;
-	};
-
 	VideoFrame* beg, * end;
 	// read first frame and place it in the first image buffer
 	cpx_map_read(cpx, 0, &beg, &end);
-	while (beg == end)
+	int retries = 0;
+	const int maxRetries = 1000;
+	while (beg == end && retries < maxRetries)
 	{
+		retries++;
 		cpx_map_read(cpx, 0, &beg, &end);
 		std::this_thread::sleep_for(std::chrono::milliseconds(5));
 	}
+	if (retries >= maxRetries)
+		return ERR_TIMEOUT;
+
 	memcpy(imgs[0].GetPixelsRW(), beg->data, beg->bytes_of_frame - sizeof(VideoFrame));
-	uint32_t n = (uint32_t)consumed_bytes(beg, end);
+	uint32_t n = (uint32_t)ConsumedBytes(beg, end);
 	cpx_unmap_read(cpx, 0, n);
 
 	// read second frame
 	if (imgs.size() > 1) {
 		cpx_map_read(cpx, 1, &beg, &end);
-		while (beg == end)
+		retries = 0;
+		while (beg == end && retries < maxRetries)
 		{
+			retries++;
 			cpx_map_read(cpx, 1, &beg, &end);
 			std::this_thread::sleep_for(std::chrono::milliseconds(5));
 		}
+		if (retries >= maxRetries)
+			return ERR_TIMEOUT;
+
 		memcpy(imgs[1].GetPixelsRW(), beg->data, beg->bytes_of_frame - sizeof(VideoFrame));
-		n = (uint32_t)consumed_bytes(beg, end);
+		n = (uint32_t)ConsumedBytes(beg, end);
 		cpx_unmap_read(cpx, 1, n);
 	}
 
 	return 0;
 }
+
+
+// read available number of frames from both streams
+// and push to circular buffer
+int AcquireCamera::readLiveFrames(int& framesRead)
+{
+	// grab available frames from camera 1
+	framesRead = 0;
+	VideoFrame* beg1, * end1;
+	int retries = 0;
+	cpx_map_read(cpx, 0, &beg1, &end1);
+	const int maxRetries = 1000;
+	while (beg1 == end1 && retries < maxRetries)
+	{
+		retries++;
+		cpx_map_read(cpx, 0, &beg1, &end1);
+		std::this_thread::sleep_for(std::chrono::milliseconds(5));
+	}
+	if (retries >= maxRetries)
+		return ERR_TIMEOUT;
+
+	size_t numFrames = ConsumedBytes(beg1, end1) / beg1->bytes_of_frame;
+	uint64_t startFrameId = beg1->frame_id;
+
+	// grab the same number of frames from camera 2
+	VideoFrame* beg2(0), * end2(0);
+	if (isDual())
+	{
+		retries = 0;
+		cpx_map_read(cpx, 1, &beg2, &end2);
+		while (((beg2 == end2) || ((ConsumedBytes(beg2, end2) / beg2->bytes_of_frame)) < numFrames) && retries < maxRetries)
+		{
+			retries++;
+			cpx_map_read(cpx, 1, &beg2, &end2);
+			std::this_thread::sleep_for(std::chrono::milliseconds(5));
+		}
+		if (retries >= maxRetries)
+			return ERR_TIMEOUT;
+	}
+
+	auto ptr1 = beg1;
+	for (size_t i = 0; i < numFrames; i++)
+	{
+		// check frame id
+		if (ptr1->frame_id != startFrameId + i)
+		{
+			LogMessage("Camera1 missed frame: expected " + std::to_string(startFrameId + 1) + ", got " + std::to_string(ptr1->frame_id));
+			return ERR_CPX_MISSED_FRAME;
+		}
+
+		int ret = GetCoreCallback()->InsertImage(this, ptr1->data, imgs[0].Width(), imgs[0].Height(), imgs[0].Depth());
+		bool overflow = false;
+		if (!stopOnOverflow && ret == DEVICE_BUFFER_OVERFLOW)
+		{
+			GetCoreCallback()->ClearImageBuffer(this);
+			overflow = true;
+		}
+		else
+			return ret;
+
+		// check sequence
+		ptr1 += beg1->bytes_of_frame;
+
+		// continue with the second frame only if the first one did not overflow
+		if (!overflow && isDual())
+		{
+			auto ptr2 = beg2;
+			if (ptr2->frame_id != startFrameId + i)
+			{
+				LogMessage("Camera2 missed frame: expected " + std::to_string(startFrameId + 1) + ", got " + std::to_string(ptr2->frame_id));
+				return ERR_CPX_MISSED_FRAME;
+			}
+
+			ret = GetCoreCallback()->InsertImage(this, ptr2->data, imgs[0].Width(), imgs[0].Height(), imgs[0].Depth());
+			if (!stopOnOverflow && ret == DEVICE_BUFFER_OVERFLOW)
+			{
+				GetCoreCallback()->ClearImageBuffer(this);
+			}
+			else
+				return ret;
+
+			ptr2 += beg2->bytes_of_frame;
+		}
+	}
+	cpx_unmap_read(cpx, 0, numFrames*beg1->bytes_of_frame);
+	if (isDual() && beg2 != nullptr)
+		cpx_unmap_read(cpx, 1, numFrames*beg2->bytes_of_frame);
+
+	framesRead = (int)numFrames;
+
+	return 0;
+}
+
 
 void AcquireCamera::setupBuffers(unsigned width, unsigned height, unsigned depth, bool dual)
 {
