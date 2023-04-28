@@ -31,15 +31,19 @@ int SequenceThread::svc()
 {
    running = true;
    imageCounter = 0;
+   int errCode = DEVICE_OK;
+   camera->LogMessage("Started sequence thread.");
    try
    {
       while (!stop)
       {
          int framesRead(0);
          int ret = camera->readLiveFrames(framesRead);
+         camera->LogMessage("Read " + std::to_string(framesRead) + " frames from CPX.");
          if (ret != DEVICE_OK)
          {
             camera->LogMessage("Reading live frames failed: " + ret);
+            errCode = ret;
             stop = true;
          }
          imageCounter += framesRead;
@@ -49,9 +53,14 @@ int SequenceThread::svc()
    }
    catch (...)
    {
-      return ERR_UNKNOWN_LIVE;
+      camera->LogMessage("Unknown error in the sequence thread. Exiting.");
+      errCode = ERR_UNKNOWN_LIVE;
    }
+   camera->abortCpx();
+   camera->GetCoreCallback()->AcqFinished(camera, errCode);
    running = false;
+   camera->LogMessage("Exiting sequence thread.");
+
    return DEVICE_OK;
 }
 

@@ -35,13 +35,9 @@
 #define ERR_UNKNOWN_LIVE 90005
 #define ERR_TIMEOUT 90006
 #define ERR_CPX_MISSED_FRAME 90007
+#define ERR_CPX_TIMEOUT 90008
 
-static const char* g_prop_Mode = "ImageMode";
-static const char* g_prop_Mode_Multi = "MultiChannel";
-static const char* g_prop_Mode_Single = "SingleChannel";
-static const char* g_prop_Hardware = "CameraHardware";
-static const char* g_prop_Hardware_Demo = "Demo";
-static const char* g_prop_Hardware_Hamamatsu = "Hamamatsu";
+static const char* g_prop_CurrentDevice = "Device";
 static const char* g_prop_Camera_1 = "Camera_1";
 static const char* g_prop_Camera_2 = "Camera_2";
 static const char* g_Camera_None = "None";
@@ -87,7 +83,7 @@ public:
 	int GetChannelName(unsigned channel, char* name);
 
 	// property handlers
-	int OnHardware(MM::PropertyBase* pProp, MM::ActionType eAct);
+	int OnDevice(MM::PropertyBase* pProp, MM::ActionType eAct);
 
 private:
 	bool initialized_;
@@ -99,6 +95,7 @@ private:
 	std::string camera2;
 	SequenceThread* liveThread;
 	bool stopOnOverflow;
+	int currentCamera;
 
 	int getCpxProperties(CpxProperties& props) const;
 	int setCpxProperties(CpxProperties& props);
@@ -107,4 +104,6 @@ private:
 	int readLiveFrames(int& framesRead);
 	void setupBuffers(unsigned width, unsigned height, unsigned depth, bool dual);
 	bool isDual() { return camera2.compare(g_Camera_None) != 0; }
+	int abortCpx();
+	void generateSyntheticImage(int channel, uint8_t value);
 };
