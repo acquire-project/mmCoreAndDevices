@@ -96,6 +96,7 @@ private:
 	SequenceThread* liveThread;
 	bool stopOnOverflow;
 	int currentCamera;
+	bool multiChannel;
 
 	int getCpxProperties(CpxProperties& props) const;
 	int setCpxProperties(CpxProperties& props);

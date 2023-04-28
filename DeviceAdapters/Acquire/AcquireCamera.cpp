@@ -42,6 +42,8 @@ const int DEMO_IMAGE_WIDTH = 320;
 const int DEMO_IMAGE_HEIGHT = 240;
 const int DEMO_IMAGE_DEPTH = 1;
 
+const bool MULTI_CHANNEL = true;
+
 const VideoFrame* next(VideoFrame* cur)
 {
 	return (VideoFrame*)(((uint8_t*)cur) + cur->bytes_of_frame);
@@ -53,7 +55,7 @@ size_t ConsumedBytes (const VideoFrame* const cur, const VideoFrame* const end)
 };
 
 
-AcquireCamera::AcquireCamera() : initialized_(false), demo(true), stopOnOverflow(false), currentCamera(0)
+AcquireCamera::AcquireCamera() : initialized_(false), demo(true), stopOnOverflow(false), currentCamera(0), multiChannel(MULTI_CHANNEL)
 {
 	// instantiate cpx
 	g_instance = this;
@@ -109,6 +111,11 @@ int AcquireCamera::Initialize()
 	if (initialized_)
 		return DEVICE_OK;
 
+	if (isDual())
+		multiChannel = true;
+	else
+		multiChannel = false;
+
 	// cameras
 	char val[MM::MaxStrLength];
 	GetProperty(g_prop_Camera_1, val);
@@ -120,8 +127,10 @@ int AcquireCamera::Initialize()
 	CPropertyAction* pAct = new CPropertyAction(this, &AcquireCamera::OnDevice);
 	CreateProperty(g_prop_CurrentDevice, camera1.c_str(), MM::String, false, pAct);
 	AddAllowedValue(g_prop_CurrentDevice, camera1.c_str(), 0);
-	if (!camera2.empty())
+	if (!isDual())
+	{
 		AddAllowedValue(g_prop_CurrentDevice, camera2.c_str(), 0);
+	}
 
 	// if we are using simulated cameras, then we are in demo mode
 	// TODO: make sure "demo" flag is necessary
@@ -337,8 +346,10 @@ const unsigned char* AcquireCamera::GetImageBuffer(unsigned channel)
 {
 	if (channel > imgs.size() - 1)
 		return nullptr;
-
-	return imgs[currentCamera].GetPixels();
+	if (multiChannel)
+		return imgs[channel].GetPixels();
+	else
+		return imgs[currentCamera].GetPixels();
 }
 
 unsigned AcquireCamera::GetNumberOfComponents() const
@@ -348,7 +359,10 @@ unsigned AcquireCamera::GetNumberOfComponents() const
 
 unsigned AcquireCamera::GetNumberOfChannels() const
 {
-	return 1;
+	if (multiChannel)
+		return imgs.size();
+	else
+		return 1;
 }
 
 int AcquireCamera::GetChannelName(unsigned channel, char* name)
@@ -575,7 +589,7 @@ int AcquireCamera::readLiveFrames(int& framesRead)
 		numFrames2 = ConsumedBytes(beg2, end2) / beg2->bytes_of_frame;
 	}
 
-	int numFrames = min(numFrames1, numFrames2);
+	int numFrames = isDual() ? min(numFrames1, numFrames2) : numFrames1;
 	auto ptr1 = beg1;
 	auto ptr2 = beg2;
 	for (size_t i = 0; i < numFrames; i++)
@@ -588,6 +602,9 @@ int AcquireCamera::readLiveFrames(int& framesRead)
 		}
 
 		memcpy(imgs[0].GetPixelsRW(), ptr1->data, imgs[0].Width() * imgs[0].Height() * imgs[0].Depth());
+		Metadata md;
+		md.PutImageTag("CpxFrameId", ptr1->frame_id);
+		md.PutImageTag("CpxTimeStamp", ptr1->timestamps.hardware);
 
 		// check sequence
 		ptr1 += beg1->bytes_of_frame;
@@ -602,19 +619,36 @@ int AcquireCamera::readLiveFrames(int& framesRead)
 			memcpy(imgs[1].GetPixelsRW(), ptr2->data, imgs[1].Width() * imgs[1].Height() * imgs[1].Depth());
 			ptr2 += beg2->bytes_of_frame;
 		}
+
+		if (multiChannel)
+		{
+			for (int bufNum = 0; bufNum < imgs.size(); bufNum++) {
+				int ret = GetCoreCallback()->InsertImage(this, imgs[bufNum].GetPixels(), imgs[bufNum].Width(), imgs[bufNum].Height(), imgs[bufNum].Depth(), 1, md.Serialize().c_str());
+				LogMessage(">>> Camera " + std::to_string(bufNum + 1) + " frame " + std::to_string(ptr1->frame_id) + " inserted");
+				if (!stopOnOverflow && ret == DEVICE_BUFFER_OVERFLOW)
+				{
+					GetCoreCallback()->ClearImageBuffer(this);
+					LogMessage("Camera buffer overflow " + std::to_string(currentCamera + 1) + " frame " + std::to_string(ptr1->frame_id));
+					break;
+				}
+			}
+		}
+		else
+		{
+			int ret = GetCoreCallback()->InsertImage(this, imgs[currentCamera].GetPixels(), imgs[currentCamera].Width(), imgs[currentCamera].Height(), imgs[currentCamera].Depth(), 1, md.Serialize().c_str());
+			LogMessage(">>> Camera " + std::to_string(currentCamera + 1) + " frame " + std::to_string(ptr1->frame_id) + " inserted");
+			if (!stopOnOverflow && ret == DEVICE_BUFFER_OVERFLOW)
+			{
+				GetCoreCallback()->ClearImageBuffer(this);
+				GetCoreCallback()->InsertImage(this, imgs[currentCamera].GetPixels(), imgs[currentCamera].Width(), imgs[currentCamera].Height(), imgs[currentCamera].Depth(), 1, md.Serialize().c_str());
+				LogMessage("Camera buffer overflow " + std::to_string(currentCamera + 1) + " frame " + std::to_string(ptr1->frame_id));
+			}
+		}
+
 	}
 	cpx_unmap_read(cpx, 0, numFrames * beg1->bytes_of_frame);
 	if (isDual() && beg2 != nullptr)
 		cpx_unmap_read(cpx, 1, numFrames * beg2->bytes_of_frame);
-
-	int ret = GetCoreCallback()->InsertImage(this, imgs[currentCamera].GetPixels(), imgs[currentCamera].Width(), imgs[currentCamera].Height(), imgs[currentCamera].Depth());
-	LogMessage(">>> Camera " + std::to_string(currentCamera + 1) + " frame " + std::to_string(ptr1->frame_id) + " inserted");
-	if (!stopOnOverflow && ret == DEVICE_BUFFER_OVERFLOW)
-	{
-		GetCoreCallback()->ClearImageBuffer(this);
-		GetCoreCallback()->InsertImage(this, imgs[currentCamera].GetPixels(), imgs[currentCamera].Width(), imgs[currentCamera].Height(), imgs[currentCamera].Depth());
-		LogMessage("Camera buffer overflow " + std::to_string(currentCamera + 1) + " frame " + std::to_string(ptr1->frame_id));
-	}
 
 	framesRead = (int)numFrames;
 
