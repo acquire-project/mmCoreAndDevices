@@ -55,7 +55,8 @@ size_t ConsumedBytes (const VideoFrame* const cur, const VideoFrame* const end)
 };
 
 
-AcquireCamera::AcquireCamera() : initialized_(false), demo(true), stopOnOverflow(false), currentCamera(0), multiChannel(MULTI_CHANNEL)
+AcquireCamera::AcquireCamera() :
+	initialized_(false), demo(true), stopOnOverflow(false), currentCamera(0), multiChannel(MULTI_CHANNEL), liveThread(nullptr)
 {
 	// instantiate cpx
 	g_instance = this;
@@ -149,13 +150,6 @@ int AcquireCamera::Initialize()
 	else
 		demo = false;
 
-	// binning
-	CreateProperty(MM::g_Keyword_Binning, "1", MM::Integer, false);
-
-	std::vector<std::string> binningValues;
-	binningValues.push_back("1");
-	SetAllowedValues(MM::g_Keyword_Binning, binningValues);
-
 	// test cpx loading
 	g_instance = this;
 	cpx = cpx_init(AcquireCamera::reporter);
@@ -193,37 +187,73 @@ int AcquireCamera::Initialize()
 		SIZED("Trash"),
 		&props.video[1].storage.identifier);
 
-	if (demo)
-	{
-		props.video[0].camera.settings.binning = 1;
-		props.video[0].camera.settings.pixel_type = DEMO_IMAGE_DEPTH == 2 ? SampleType_u16 : SampleType_u8;
-		props.video[0].camera.settings.shape = { DEMO_IMAGE_WIDTH, DEMO_IMAGE_HEIGHT };
-		props.video[0].max_frame_count = 1;
+	ret = cpx_configure(cpx, &props);
+	if (ret != CpxStatus_Ok)
+		return ret;
 
-		if (isDual())
-		{
-			props.video[1].camera.settings.binning = 1;
-			props.video[1].camera.settings.pixel_type = DEMO_IMAGE_DEPTH == 2 ? SampleType_u16 : SampleType_u8;
-			props.video[1].camera.settings.shape = { DEMO_IMAGE_WIDTH, DEMO_IMAGE_HEIGHT };
-			props.video[1].max_frame_count = 1;
-		}
-	}
-	// TODO: what if not demo???
+	// get camera properties again because we might have changed something during configure
+	props = {};
+	ret = getCpxProperties(props);
+	if (ret != CpxStatus_Ok)
+		return ret;
+
+	// get metatadata
+	CpxPropertyMetadata meta = {};
+	ret = cpx_get_configuration_metadata(cpx, &meta);
+	if (ret != CpxStatus_Ok)
+		return ret;
+
+	props.video[0].camera.settings.binning = 1;
+	props.video[0].camera.settings.shape = { (unsigned)meta.video[0].camera.shape.x.high, (unsigned)meta.video[0].camera.shape.y.high };
+	props.video[0].camera.settings.offset = { 0, 0 };
+	props.video[0].max_frame_count = 1;
+	props.video[0].camera.settings.exposure_time_us = 20000;
+	props.video[1].camera.settings.binning = 1;
+	props.video[1].camera.settings.shape = props.video[0].camera.settings.shape;
+	props.video[0].camera.settings.offset = { 0, 0 };
+	props.video[1].max_frame_count = 1;
+	props.video[0].camera.settings.exposure_time_us = 20000;
 
 	ret = cpx_configure(cpx, &props);
 	if (ret != CpxStatus_Ok)
 		return ret;
 
-	if (props.video[0].camera.settings.pixel_type > 1)
-	{
-		LogMessage("Acquire MM adapter does not support device pixel type");
-		return ERR_UNSUPPORTED_PIXEL_TYPE;
-	}
+	// get camera properties again because we might have changed something during configure
+	props = {};
+	ret = getCpxProperties(props);
+	if (ret != CpxStatus_Ok)
+		return ret;
+
+	// binning
+	pAct = new CPropertyAction(this, &AcquireCamera::OnBinning);
+	ret = CreateIntegerProperty(MM::g_Keyword_Binning, 1, false, pAct);
+	if (ret != DEVICE_OK)
+		return ret;
+
+	vector<string> binValues;
+	binValues.push_back("1");
+	binValues.push_back("2");
+	binValues.push_back("4");
+	SetAllowedValues(MM::g_Keyword_Binning, binValues);
+
+	// pixel type
+	pAct = new CPropertyAction(this, &AcquireCamera::OnPixelType);
+	ret = CreateStringProperty(MM::g_Keyword_PixelType, g_PixelType_8bit, false, pAct);
+	if (ret != DEVICE_OK)
+		return ret;
+
+	vector<string> pixelTypeValues;
+	// 
+	if (meta.video[0].camera.supported_pixel_types == 0 || meta.video[0].camera.supported_pixel_types & 0x01)
+      pixelTypeValues.push_back(g_PixelType_8bit);
+	if (meta.video[0].camera.supported_pixel_types & 0x02)
+		pixelTypeValues.push_back(g_PixelType_16bit);
+
+	ret = SetAllowedValues(MM::g_Keyword_PixelType, pixelTypeValues);
+	if (ret != DEVICE_OK)
+		return ret;
 
 	setupBuffers(props.video[0].camera.settings.shape.x, props.video[0].camera.settings.shape.y, props.video[0].camera.settings.pixel_type + 1, isDual());
-
-	// we are assuming that cameras are identical
-	CreateProperty("LineIntervalUs", to_string(props.video[0].camera.settings.line_interval_us).c_str(), MM::Float, false);
 
 	initialized_ = true;
 	return DEVICE_OK;
@@ -360,7 +390,7 @@ unsigned AcquireCamera::GetNumberOfComponents() const
 unsigned AcquireCamera::GetNumberOfChannels() const
 {
 	if (multiChannel)
-		return imgs.size();
+		return (unsigned) imgs.size();
 	else
 		return 1;
 }
@@ -589,9 +619,11 @@ int AcquireCamera::readLiveFrames(int& framesRead)
 		numFrames2 = ConsumedBytes(beg2, end2) / beg2->bytes_of_frame;
 	}
 
-	int numFrames = isDual() ? min(numFrames1, numFrames2) : numFrames1;
+	size_t numFrames = isDual() ? min(numFrames1, numFrames2) : numFrames1;
 	auto ptr1 = beg1;
 	auto ptr2 = beg2;
+
+	// insert frames into circular buffer
 	for (size_t i = 0; i < numFrames; i++)
 	{
 		// check frame id
@@ -605,9 +637,8 @@ int AcquireCamera::readLiveFrames(int& framesRead)
 		Metadata md;
 		md.PutImageTag("CpxFrameId", ptr1->frame_id);
 		md.PutImageTag("CpxTimeStamp", ptr1->timestamps.hardware);
+		auto currentFrameId = ptr1->frame_id;
 
-		// check sequence
-		ptr1 += beg1->bytes_of_frame;
 
 		if (isDual())
 		{
@@ -617,18 +648,18 @@ int AcquireCamera::readLiveFrames(int& framesRead)
 				// return ERR_CPX_MISSED_FRAME;
 			}
 			memcpy(imgs[1].GetPixelsRW(), ptr2->data, imgs[1].Width() * imgs[1].Height() * imgs[1].Depth());
-			ptr2 += beg2->bytes_of_frame;
+
 		}
 
 		if (multiChannel)
 		{
 			for (int bufNum = 0; bufNum < imgs.size(); bufNum++) {
 				int ret = GetCoreCallback()->InsertImage(this, imgs[bufNum].GetPixels(), imgs[bufNum].Width(), imgs[bufNum].Height(), imgs[bufNum].Depth(), 1, md.Serialize().c_str());
-				LogMessage(">>> Camera " + std::to_string(bufNum + 1) + " frame " + std::to_string(ptr1->frame_id) + " inserted");
+				LogMessage(">>> Camera " + std::to_string(bufNum + 1) + " frame " + std::to_string(currentFrameId) + " inserted");
 				if (!stopOnOverflow && ret == DEVICE_BUFFER_OVERFLOW)
 				{
 					GetCoreCallback()->ClearImageBuffer(this);
-					LogMessage("Camera buffer overflow " + std::to_string(currentCamera + 1) + " frame " + std::to_string(ptr1->frame_id));
+					LogMessage("Camera buffer overflow " + std::to_string(bufNum + 1) + " frame " + std::to_string(currentFrameId));
 					break;
 				}
 			}
@@ -636,15 +667,18 @@ int AcquireCamera::readLiveFrames(int& framesRead)
 		else
 		{
 			int ret = GetCoreCallback()->InsertImage(this, imgs[currentCamera].GetPixels(), imgs[currentCamera].Width(), imgs[currentCamera].Height(), imgs[currentCamera].Depth(), 1, md.Serialize().c_str());
-			LogMessage(">>> Camera " + std::to_string(currentCamera + 1) + " frame " + std::to_string(ptr1->frame_id) + " inserted");
+			LogMessage(">>> Camera " + std::to_string(currentCamera + 1) + " frame " + std::to_string(currentFrameId) + " inserted");
 			if (!stopOnOverflow && ret == DEVICE_BUFFER_OVERFLOW)
 			{
 				GetCoreCallback()->ClearImageBuffer(this);
 				GetCoreCallback()->InsertImage(this, imgs[currentCamera].GetPixels(), imgs[currentCamera].Width(), imgs[currentCamera].Height(), imgs[currentCamera].Depth(), 1, md.Serialize().c_str());
-				LogMessage("Camera buffer overflow " + std::to_string(currentCamera + 1) + " frame " + std::to_string(ptr1->frame_id));
+				LogMessage("Camera buffer overflow " + std::to_string(currentCamera + 1) + " frame " + std::to_string(currentFrameId));
 			}
 		}
-
+		// advance to the next frame
+		ptr1 += beg1->bytes_of_frame;
+		if (isDual())
+         ptr2 += beg2->bytes_of_frame;
 	}
 	cpx_unmap_read(cpx, 0, numFrames * beg1->bytes_of_frame);
 	if (isDual() && beg2 != nullptr)
@@ -689,6 +723,96 @@ void AcquireCamera::generateSyntheticImage(int channel, uint8_t value)
 	LogMessage(">>> Synthetic image generated in channel " + std::to_string(channel) + ", level: " + std::to_string(value));
 }
 
+int AcquireCamera::setPixelType(const char* pixType)
+{
+	CpxProperties props = {};
+	int ret = getCpxProperties(props);
+	if (ret != CpxStatus_Ok)
+		return ret;
+
+	int depth = 0;
+
+	if (strcmp(pixType, g_PixelType_8bit) == 0)
+	{
+		props.video[0].camera.settings.pixel_type = SampleType_u8;
+		props.video[1].camera.settings.pixel_type = SampleType_u8;
+		depth = 1;
+   }
+	else if (strcmp(pixType, g_PixelType_16bit) == 0)
+	{
+		props.video[0].camera.settings.pixel_type = SampleType_u16;
+		props.video[1].camera.settings.pixel_type = SampleType_u16;
+		depth = 2;
+	}
+	else
+	{
+      return ERR_UNKNOWN_PIXEL_TYPE;
+   }
+	// apply new settings
+	ret = cpx_configure(cpx, &props);
+	if (ret != CpxStatus_Ok)
+		return ret;
+
+   return setupBuffers();
+}
+
+int AcquireCamera::getPixelType(std::string& pixType)
+{
+	CpxProperties props = {};
+	int ret = getCpxProperties(props);
+	if (ret != CpxStatus_Ok)
+		return ret;
+	if (props.video[0].camera.settings.pixel_type == SampleType_u8)
+		pixType = g_PixelType_8bit;
+	else if (props.video[0].camera.settings.pixel_type == SampleType_u16)
+		pixType = g_PixelType_16bit;
+	else
+		return ERR_UNKNOWN_PIXEL_TYPE;
+	return DEVICE_OK;
+}
+
+int AcquireCamera::setBinning(int bin)
+{
+	CpxProperties props = {};
+	int ret = getCpxProperties(props);
+	if (ret != CpxStatus_Ok)
+		return ret;
+
+	props.video[0].camera.settings.binning = (uint8_t)bin;
+	props.video[1].camera.settings.binning = (uint8_t)bin;
+
+	// apply new settings
+	ret = cpx_configure(cpx, &props);
+	if (ret != CpxStatus_Ok)
+		return ret;
+
+	return setupBuffers();
+
+}
+
+int AcquireCamera::getBinning(int& bin)
+{
+	CpxProperties props = {};
+	int ret = getCpxProperties(props);
+	if (ret != CpxStatus_Ok)
+		return ret;
+	bin = props.video[0].camera.settings.binning;
+	return DEVICE_OK;
+}
+
+// Setup buffers based on the current state of the camera
+int AcquireCamera::setupBuffers()
+{
+	CpxProperties props = {};
+
+	int ret = getCpxProperties(props);
+	if (ret != CpxStatus_Ok)
+		return ret;
+
+	setupBuffers(props.video[0].camera.settings.shape.x, props.video[0].camera.settings.shape.y, props.video[0].camera.settings.pixel_type + 1, isDual());
+	return DEVICE_OK;
+}
+
 //////////////////////////////////////////////////////////////////////////////////////////////
 // Property Handlers
 //////////////////////////////////////////////////////////////////////////////////////////////
@@ -711,6 +835,48 @@ int AcquireCamera::OnDevice(MM::PropertyBase* pProp, MM::ActionType eAct)
 		{
 			currentCamera=1;
 		}
+	}
+
+	return DEVICE_OK;
+}
+
+int AcquireCamera::OnPixelType(MM::PropertyBase* pProp, MM::ActionType eAct)
+{
+	if (eAct == MM::BeforeGet)
+	{
+		string pixType;
+		int ret = getPixelType(pixType);
+		if (ret != DEVICE_OK)
+			return ret;
+		pProp->Set(pixType.c_str());
+	}
+	else if (eAct == MM::AfterSet)
+	{
+		string pixType;
+		pProp->Get(pixType);
+		int ret = setPixelType(pixType.c_str());
+		if (ret != DEVICE_OK)
+			return ret;
+	}
+	return DEVICE_OK;
+}
+
+int AcquireCamera::OnBinning(MM::PropertyBase* pProp, MM::ActionType eAct)
+{
+	if (eAct == MM::BeforeGet)
+	{
+		int bin;
+		int ret = getBinning(bin);
+		if (ret != DEVICE_OK)
+			return ret;
+		pProp->Set((long)bin);
+
+	}
+	else if (eAct == MM::AfterSet)
+	{
+		long bin;
+		pProp->Get(bin);
+		int ret = setBinning((int)bin);
 	}
 
 	return DEVICE_OK;

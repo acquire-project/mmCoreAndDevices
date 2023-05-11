@@ -36,11 +36,16 @@
 #define ERR_TIMEOUT 90006
 #define ERR_CPX_MISSED_FRAME 90007
 #define ERR_CPX_TIMEOUT 90008
+#define ERR_UNKNOWN_PIXEL_TYPE 90009
 
 static const char* g_prop_CurrentDevice = "Device";
 static const char* g_prop_Camera_1 = "Camera_1";
 static const char* g_prop_Camera_2 = "Camera_2";
 static const char* g_Camera_None = "None";
+// constants for naming pixel types (allowed values of the "PixelType" property)
+static const char* g_PixelType_8bit = "8bit";
+static const char* g_PixelType_16bit = "16bit";
+
 
 extern const char* cameraName;
 struct CpxRuntime;
@@ -84,6 +89,8 @@ public:
 
 	// property handlers
 	int OnDevice(MM::PropertyBase* pProp, MM::ActionType eAct);
+	int OnPixelType(MM::PropertyBase* pProp, MM::ActionType eAct);
+	int OnBinning(MM::PropertyBase* pProp, MM::ActionType eAct);
 
 private:
 	bool initialized_;
@@ -107,4 +114,9 @@ private:
 	bool isDual() { return camera2.compare(g_Camera_None) != 0; }
 	int abortCpx();
 	void generateSyntheticImage(int channel, uint8_t value);
+	int setPixelType(const char* pixType);
+	int getPixelType(std::string& pixType);
+	int setBinning(int bin);
+	int getBinning(int& bin);
+	int setupBuffers();
 };
