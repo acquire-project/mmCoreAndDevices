@@ -214,6 +214,8 @@ int AcquireCamera::Initialize()
 	props.video[1].max_frame_count = 1;
 	props.video[0].camera.settings.exposure_time_us = 20000;
 
+	// TODO: determine full frame ROI and store it for further reference
+
 	ret = cpx_configure(cpx, &props);
 	if (ret != CpxStatus_Ok)
 		return ret;
@@ -346,11 +348,21 @@ double AcquireCamera::GetExposure() const
 
 int AcquireCamera::SetROI(unsigned x, unsigned y, unsigned xSize, unsigned ySize)
 {
+	// TODO: set video source shape for the current binning factor
 	return DEVICE_OK;
 }
 
 int AcquireCamera::GetROI(unsigned & x, unsigned & y, unsigned & xSize, unsigned & ySize)
 {
+	CpxProperties props = {};
+	int ret = getCpxProperties(props);
+
+	xSize = props.video[0].camera.settings.shape.x;
+	ySize = props.video[0].camera.settings.shape.y;
+	x = props.video[0].camera.settings.offset.x;
+   y = props.video[0].camera.settings.offset.y;
+	if (ret != CpxStatus_Ok)
+		return ret;
 
 	return DEVICE_OK;
 }
@@ -780,6 +792,8 @@ int AcquireCamera::setBinning(int bin)
 
 	props.video[0].camera.settings.binning = (uint8_t)bin;
 	props.video[1].camera.settings.binning = (uint8_t)bin;
+
+	// TODO: reset the ROI to full frame to avoid confusion
 
 	// apply new settings
 	ret = cpx_configure(cpx, &props);
