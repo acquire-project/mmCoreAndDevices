@@ -204,17 +204,32 @@ int AcquireCamera::Initialize()
 		return ret;
 
 	props.video[0].camera.settings.binning = 1;
-	props.video[0].camera.settings.shape = { (unsigned)meta.video[0].camera.shape.x.high, (unsigned)meta.video[0].camera.shape.y.high };
+	if (demo)
+		// for demo camera use hardcoded values
+		props.video[0].camera.settings.shape = { DEMO_IMAGE_WIDTH, DEMO_IMAGE_HEIGHT };
+	else
+		// for actual cameras use the values from the metadata
+		props.video[0].camera.settings.shape = { (unsigned)meta.video[0].camera.shape.x.high, (unsigned)meta.video[0].camera.shape.y.high };
 	props.video[0].camera.settings.offset = { 0, 0 };
 	props.video[0].max_frame_count = 1;
 	props.video[0].camera.settings.exposure_time_us = 20000;
-	props.video[1].camera.settings.binning = 1;
-	props.video[1].camera.settings.shape = props.video[0].camera.settings.shape;
-	props.video[0].camera.settings.offset = { 0, 0 };
-	props.video[1].max_frame_count = 1;
-	props.video[0].camera.settings.exposure_time_us = 20000;
+	props.video[0].camera.settings.binning = 1;
 
-	// TODO: determine full frame ROI and store it for further reference
+	props.video[1].camera.settings.shape = props.video[0].camera.settings.shape;
+	props.video[1].camera.settings.offset = props.video[0].camera.settings.offset;
+	props.video[1].max_frame_count = props.video[0].max_frame_count;
+	props.video[1].camera.settings.binning = props.video[0].camera.settings.binning;
+	props.video[1].camera.settings.exposure_time_us = props.video[0].camera.settings.exposure_time_us;
+
+	if (demo)
+	{
+		fullFrame.xSize = DEMO_IMAGE_WIDTH;
+      fullFrame.ySize = DEMO_IMAGE_HEIGHT;
+	}
+	else {
+      fullFrame.xSize = (int)meta.video[0].camera.shape.x.high;
+      fullFrame.ySize = (int)meta.video[0].camera.shape.y.high;
+   }
 
 	ret = cpx_configure(cpx, &props);
 	if (ret != CpxStatus_Ok)
@@ -348,8 +363,24 @@ double AcquireCamera::GetExposure() const
 
 int AcquireCamera::SetROI(unsigned x, unsigned y, unsigned xSize, unsigned ySize)
 {
-	// TODO: set video source shape for the current binning factor
-	return DEVICE_OK;
+	CpxProperties props = {};
+	int ret = getCpxProperties(props);
+	if (ret != CpxStatus_Ok)
+		return ret;
+
+	for (int i = 0; i < imgs.size(); i++)
+	{
+		props.video[i].camera.settings.shape.x = x;
+		props.video[i].camera.settings.shape.y = y;
+		props.video[i].camera.settings.offset.x = xSize;
+		props.video[i].camera.settings.offset.y = ySize;
+	}
+
+	ret = cpx_configure(cpx, &props);
+	if (ret != CpxStatus_Ok)
+		return ret;
+
+	return setupBuffers();
 }
 
 int AcquireCamera::GetROI(unsigned & x, unsigned & y, unsigned & xSize, unsigned & ySize)
@@ -369,7 +400,24 @@ int AcquireCamera::GetROI(unsigned & x, unsigned & y, unsigned & xSize, unsigned
 
 int AcquireCamera::ClearROI()
 {
-	return DEVICE_OK;
+	CpxProperties props = {};
+	int ret = getCpxProperties(props);
+	if (ret != CpxStatus_Ok)
+		return ret;
+
+	for (int i = 0; i < imgs.size(); i++)
+	{
+		props.video[i].camera.settings.shape.x = fullFrame.xSize;
+		props.video[i].camera.settings.shape.y = fullFrame.ySize;
+		props.video[i].camera.settings.offset.x = fullFrame.x;
+		props.video[i].camera.settings.offset.y = fullFrame.y;
+	}
+
+	ret = cpx_configure(cpx, &props);
+	if (ret != CpxStatus_Ok)
+		return ret;
+
+	return setupBuffers();
 }
 
 int AcquireCamera::IsExposureSequenceable(bool & isSequenceable) const
@@ -790,18 +838,40 @@ int AcquireCamera::setBinning(int bin)
 	if (ret != CpxStatus_Ok)
 		return ret;
 
-	props.video[0].camera.settings.binning = (uint8_t)bin;
-	props.video[1].camera.settings.binning = (uint8_t)bin;
+	for (int i = 0; i < imgs.size(); i++)
+	{
+		// reset the ROI to full frame to avoid confusion
+		props.video[i].camera.settings.offset.x = (uint8_t)fullFrame.x;
+		props.video[i].camera.settings.offset.y = (uint8_t)fullFrame.y;
+		props.video[i].camera.settings.shape.x = (uint32_t)fullFrame.xSize;
+		props.video[i].camera.settings.shape.y = (uint32_t)fullFrame.ySize;
+	}
 
-	// TODO: reset the ROI to full frame to avoid confusion
+	// apply frame
+	ret = cpx_configure(cpx, &props);
+	if (ret != CpxStatus_Ok)
+		return ret;
 
-	// apply new settings
+	ret = setupBuffers();
+	if (ret != DEVICE_OK)
+		return ret;
+
+	ret = getCpxProperties(props);
+	if (ret != CpxStatus_Ok)
+		return ret;
+
+	// now do the binning
+	for (int i = 0; i < imgs.size(); i++)
+	{
+		props.video[i].camera.settings.binning = (uint8_t)bin;
+		props.video[i].camera.settings.shape.x = (uint32_t)(fullFrame.xSize / bin);
+		props.video[i].camera.settings.shape.y = (uint32_t)(fullFrame.ySize / bin);
+	}
 	ret = cpx_configure(cpx, &props);
 	if (ret != CpxStatus_Ok)
 		return ret;
 
 	return setupBuffers();
-
 }
 
 int AcquireCamera::getBinning(int& bin)

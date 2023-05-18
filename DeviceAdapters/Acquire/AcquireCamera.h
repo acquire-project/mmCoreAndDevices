@@ -52,6 +52,14 @@ struct CpxRuntime;
 struct CpxProperties;
 class SequenceThread;
 
+class AcquireROI {
+public:
+	int x;
+	int y;
+	int xSize;
+	int ySize;
+};
+
 class AcquireCamera : public CCameraBase<AcquireCamera>
 {
 public:
@@ -104,6 +112,7 @@ private:
 	bool stopOnOverflow;
 	int currentCamera;
 	bool multiChannel;
+	AcquireROI fullFrame;
 
 	int getCpxProperties(CpxProperties& props) const;
 	int setCpxProperties(CpxProperties& props);
