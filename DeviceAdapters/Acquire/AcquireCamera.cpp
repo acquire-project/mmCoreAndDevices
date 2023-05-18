@@ -21,8 +21,8 @@
 //                limitations under the License.
 
 #include "AcquireCamera.h"
-#include "cpx.h"
-#include "device/device.manager.h"
+#include "acquire.h"
+#include "device/hal/device.manager.h"
 #include <sstream>
 #include <chrono>
 #include <thread>
@@ -60,12 +60,12 @@ AcquireCamera::AcquireCamera() :
 {
 	// instantiate cpx
 	g_instance = this;
-	cpx = cpx_init(AcquireCamera::reporter);
-	auto dm = cpx_device_manager(cpx);
+	cpx = acquire_init(AcquireCamera::reporter);
+	auto dm = acquire_device_manager(cpx);
 	if (!cpx || !dm)
 	{
 		g_instance = nullptr;
-		LogMessage("CPX inistialize failed");
+		LogMessage("CPX initialize failed");
 		return;
 	}
 
@@ -74,7 +74,7 @@ AcquireCamera::AcquireCamera() :
 	for (uint32_t i = 0; i < device_manager_count(dm); ++i) {
 		struct DeviceIdentifier identifier = {};
 		int ret = device_manager_get(&identifier, dm, i);
-		if (ret != CpxStatus_Ok) {
+		if (ret != AcquireStatus_Ok) {
 			LogMessage("cpx failed getting device identifier");
 		}
 		if (identifier.kind == DeviceKind_Camera)
@@ -152,27 +152,27 @@ int AcquireCamera::Initialize()
 
 	// test cpx loading
 	g_instance = this;
-	cpx = cpx_init(AcquireCamera::reporter);
-	auto dm = cpx_device_manager(cpx);
+	cpx = acquire_init(AcquireCamera::reporter);
+	auto dm = acquire_device_manager(cpx);
 	if (!cpx || !dm)
 	{
 		g_instance = nullptr;
 		return ERR_CPX_INIT;
 	}
 
-	CpxProperties props = {};
-	int ret = getCpxProperties(props);
-	if (ret != CpxStatus_Ok)
+	AcquireProperties props = {};
+	int ret = getAcquireProperties(props);
+	if (ret != AcquireStatus_Ok)
 		return ret;
 
 	ret = device_manager_select(dm, DeviceKind_Camera, camera1.c_str(), camera1.size(), &props.video[0].camera.identifier);
-	if (ret != CpxStatus_Ok)
+	if (ret != AcquireStatus_Ok)
 		return ret;
 	
 	if (isDual())
 	{
 		ret = device_manager_select(dm, DeviceKind_Camera, camera2.c_str(), camera2.size(), &props.video[1].camera.identifier);
-		if (ret != CpxStatus_Ok)
+		if (ret != AcquireStatus_Ok)
 			return ret;
 	}
 
@@ -187,20 +187,20 @@ int AcquireCamera::Initialize()
 		SIZED("Trash"),
 		&props.video[1].storage.identifier);
 
-	ret = cpx_configure(cpx, &props);
-	if (ret != CpxStatus_Ok)
+	ret = acquire_configure(cpx, &props);
+	if (ret != AcquireStatus_Ok)
 		return ret;
 
 	// get camera properties again because we might have changed something during configure
 	props = {};
-	ret = getCpxProperties(props);
-	if (ret != CpxStatus_Ok)
+	ret = getAcquireProperties(props);
+	if (ret != AcquireStatus_Ok)
 		return ret;
 
 	// get metatadata
-	CpxPropertyMetadata meta = {};
-	ret = cpx_get_configuration_metadata(cpx, &meta);
-	if (ret != CpxStatus_Ok)
+	AcquirePropertyMetadata meta = {};
+	ret = acquire_get_configuration_metadata(cpx, &meta);
+	if (ret != AcquireStatus_Ok)
 		return ret;
 
 	props.video[0].camera.settings.binning = 1;
@@ -231,14 +231,14 @@ int AcquireCamera::Initialize()
       fullFrame.ySize = (int)meta.video[0].camera.shape.y.high;
    }
 
-	ret = cpx_configure(cpx, &props);
-	if (ret != CpxStatus_Ok)
+	ret = acquire_configure(cpx, &props);
+	if (ret != AcquireStatus_Ok)
 		return ret;
 
 	// get camera properties again because we might have changed something during configure
 	props = {};
-	ret = getCpxProperties(props);
-	if (ret != CpxStatus_Ok)
+	ret = getAcquireProperties(props);
+	if (ret != AcquireStatus_Ok)
 		return ret;
 
 	// binning
@@ -283,8 +283,8 @@ int AcquireCamera::Shutdown()
 
 	if (cpx)
 	{
-		auto ret = cpx_shutdown(cpx);
-		if (ret != CpxStatus_Ok)
+		auto ret = acquire_shutdown(cpx);
+		if (ret != AcquireStatus_Ok)
 			LogMessage("cpx_shutdown error: " + ret);
 		cpx = nullptr;
 		g_instance = nullptr;
@@ -322,15 +322,15 @@ int AcquireCamera::SetBinning(int)
 
 void AcquireCamera::SetExposure(double exposure)
 {
-	CpxProperties props = {};
-	int ret = getCpxProperties(props);
+	AcquireProperties props = {};
+	int ret = getAcquireProperties(props);
 	if (ret != DEVICE_OK)
 		LogMessage("Error obtaining properties: code=" + ret);
 
-	auto dm = cpx_device_manager(cpx);
+	auto dm = acquire_device_manager(cpx);
 
 	ret = device_manager_select(dm, DeviceKind_Camera, camera1.c_str(), camera1.size(), &props.video[0].camera.identifier);
-	if (ret != CpxStatus_Ok)
+	if (ret != AcquireStatus_Ok)
 	{
 		LogMessage("CPX Select 1 failed");
 	}
@@ -338,7 +338,7 @@ void AcquireCamera::SetExposure(double exposure)
 	if (isDual())
 	{
 		ret = device_manager_select(dm, DeviceKind_Camera, camera2.c_str(), camera2.size(), &props.video[1].camera.identifier);
-		if (ret != CpxStatus_Ok)
+		if (ret != AcquireStatus_Ok)
 			LogMessage("CPX Select 2 failed");
 	}
 
@@ -346,7 +346,7 @@ void AcquireCamera::SetExposure(double exposure)
 	if (isDual())
 		props.video[1].camera.settings.exposure_time_us = props.video[0].camera.settings.exposure_time_us;
 
-	ret = setCpxProperties(props);
+	ret = setAcquireProperties(props);
 	if (ret != DEVICE_OK)
 		LogMessage("Error setting exposure: code=" + ret);
 
@@ -354,8 +354,8 @@ void AcquireCamera::SetExposure(double exposure)
 
 double AcquireCamera::GetExposure() const
 {
-	CpxProperties props = {};
-	int ret = getCpxProperties(props);
+	AcquireProperties props = {};
+	int ret = getAcquireProperties(props);
 	if (ret != DEVICE_OK)
 		LogMessage("Error obtaining properties: code=" + ret);
 	return props.video[0].camera.settings.exposure_time_us / 1000.0;
@@ -363,9 +363,9 @@ double AcquireCamera::GetExposure() const
 
 int AcquireCamera::SetROI(unsigned x, unsigned y, unsigned xSize, unsigned ySize)
 {
-	CpxProperties props = {};
-	int ret = getCpxProperties(props);
-	if (ret != CpxStatus_Ok)
+	AcquireProperties props = {};
+	int ret = getAcquireProperties(props);
+	if (ret != AcquireStatus_Ok)
 		return ret;
 
 	for (int i = 0; i < imgs.size(); i++)
@@ -376,8 +376,8 @@ int AcquireCamera::SetROI(unsigned x, unsigned y, unsigned xSize, unsigned ySize
 		props.video[i].camera.settings.offset.y = ySize;
 	}
 
-	ret = cpx_configure(cpx, &props);
-	if (ret != CpxStatus_Ok)
+	ret = acquire_configure(cpx, &props);
+	if (ret != AcquireStatus_Ok)
 		return ret;
 
 	return setupBuffers();
@@ -385,14 +385,14 @@ int AcquireCamera::SetROI(unsigned x, unsigned y, unsigned xSize, unsigned ySize
 
 int AcquireCamera::GetROI(unsigned & x, unsigned & y, unsigned & xSize, unsigned & ySize)
 {
-	CpxProperties props = {};
-	int ret = getCpxProperties(props);
+	AcquireProperties props = {};
+	int ret = getAcquireProperties(props);
 
 	xSize = props.video[0].camera.settings.shape.x;
 	ySize = props.video[0].camera.settings.shape.y;
 	x = props.video[0].camera.settings.offset.x;
    y = props.video[0].camera.settings.offset.y;
-	if (ret != CpxStatus_Ok)
+	if (ret != AcquireStatus_Ok)
 		return ret;
 
 	return DEVICE_OK;
@@ -400,9 +400,9 @@ int AcquireCamera::GetROI(unsigned & x, unsigned & y, unsigned & xSize, unsigned
 
 int AcquireCamera::ClearROI()
 {
-	CpxProperties props = {};
-	int ret = getCpxProperties(props);
-	if (ret != CpxStatus_Ok)
+	AcquireProperties props = {};
+	int ret = getAcquireProperties(props);
+	if (ret != AcquireStatus_Ok)
 		return ret;
 
 	for (int i = 0; i < imgs.size(); i++)
@@ -413,8 +413,8 @@ int AcquireCamera::ClearROI()
 		props.video[i].camera.settings.offset.y = fullFrame.y;
 	}
 
-	ret = cpx_configure(cpx, &props);
-	if (ret != CpxStatus_Ok)
+	ret = acquire_configure(cpx, &props);
+	if (ret != AcquireStatus_Ok)
 		return ret;
 
 	return setupBuffers();
@@ -482,9 +482,9 @@ unsigned AcquireCamera::GetImageBytesPerPixel() const
 
 int AcquireCamera::SnapImage()
 {
-	CpxProperties props = {};
-	getCpxProperties(props);
-	auto dm = cpx_device_manager(cpx);
+	AcquireProperties props = {};
+	getAcquireProperties(props);
+	auto dm = acquire_device_manager(cpx);
 
 	// make sure we are acquiring only one frame
 	props.video[0].max_frame_count = 1;
@@ -493,20 +493,20 @@ int AcquireCamera::SnapImage()
 		props.video[1].max_frame_count = 1;
 	}
 
-	int ret = cpx_configure(cpx, &props);
-	if (ret != CpxStatus_Ok)
+	int ret = acquire_configure(cpx, &props);
+	if (ret != AcquireStatus_Ok)
 	{
 		LogMessage("cpx_configure failed");
 		return ERR_CPX_CONFIURE_FAILED;
 	}
 
 	// start single frame
-	ret = cpx_start(cpx);
-	if (ret != CpxStatus_Ok)
+	ret = acquire_start(cpx);
+	if (ret != AcquireStatus_Ok)
 		throw std::exception("cpx_start failed");
 
 	ret = readSnapImageFrames();
-	cpx_stop(cpx);
+	acquire_stop(cpx);
 	
 	if (ret != DEVICE_OK)
 		return ret;
@@ -524,21 +524,21 @@ int AcquireCamera::StartSequenceAcquisition(long numImages, double interval_ms, 
 		return ret;
 
 
-	CpxProperties props = {};
-	getCpxProperties(props);
+	AcquireProperties props = {};
+	getAcquireProperties(props);
 
 	props.video[0].max_frame_count = numImages == 0 ? MAXUINT64 : numImages;
 	props.video[1].max_frame_count = numImages == 0 ? MAXUINT64 : numImages;
 
-	ret = cpx_configure(cpx, &props);
-	if (ret != CpxStatus_Ok)
+	ret = acquire_configure(cpx, &props);
+	if (ret != AcquireStatus_Ok)
 	{
 		LogMessage("cpx_configure failed");
 		return ERR_CPX_CONFIURE_FAILED;
 	}
 
-	ret = cpx_start(cpx);
-	if (ret != CpxStatus_Ok)
+	ret = acquire_start(cpx);
+	if (ret != AcquireStatus_Ok)
 		return ret;
 
 	LogMessage("Started sequence acquisition.");
@@ -563,15 +563,15 @@ bool AcquireCamera::IsCapturing()
 	return liveThread->IsActive();
 }
 
-int AcquireCamera::getCpxProperties(CpxProperties& props) const
+int AcquireCamera::getAcquireProperties(AcquireProperties& props) const
 {
 	props = {};
-	return cpx_get_configuration(cpx, &props);
+	return acquire_get_configuration(cpx, &props);
 }
 
-int AcquireCamera::setCpxProperties(CpxProperties& props)
+int AcquireCamera::setAcquireProperties(AcquireProperties& props)
 {
-	return cpx_configure(cpx, &props);
+	return acquire_configure(cpx, &props);
 }
 
 // Send message to micro-manager log
@@ -598,13 +598,13 @@ int AcquireCamera::readSnapImageFrames()
 {
 	VideoFrame* beg, * end;
 	// read first frame and place it in the first image buffer
-	cpx_map_read(cpx, 0, &beg, &end);
+	acquire_map_read(cpx, 0, &beg, &end);
 	int retries = 0;
 	const int maxRetries = 1000;
 	while (beg == end && retries < maxRetries)
 	{
 		retries++;
-		cpx_map_read(cpx, 0, &beg, &end);
+		acquire_map_read(cpx, 0, &beg, &end);
 		std::this_thread::sleep_for(std::chrono::milliseconds(5));
 	}
 	if (retries >= maxRetries)
@@ -612,16 +612,16 @@ int AcquireCamera::readSnapImageFrames()
 
 	memcpy(imgs[0].GetPixelsRW(), beg->data, beg->bytes_of_frame - sizeof(VideoFrame));
 	uint32_t n = (uint32_t)ConsumedBytes(beg, end);
-	cpx_unmap_read(cpx, 0, n);
+	acquire_unmap_read(cpx, 0, n);
 
 	// read second frame
 	if (imgs.size() > 1) {
-		cpx_map_read(cpx, 1, &beg, &end);
+		acquire_map_read(cpx, 1, &beg, &end);
 		retries = 0;
 		while (beg == end && retries < maxRetries)
 		{
 			retries++;
-			cpx_map_read(cpx, 1, &beg, &end);
+			acquire_map_read(cpx, 1, &beg, &end);
 			std::this_thread::sleep_for(std::chrono::milliseconds(5));
 		}
 		if (retries >= maxRetries)
@@ -629,7 +629,7 @@ int AcquireCamera::readSnapImageFrames()
 
 		memcpy(imgs[1].GetPixelsRW(), beg->data, beg->bytes_of_frame - sizeof(VideoFrame));
 		n = (uint32_t)ConsumedBytes(beg, end);
-		cpx_unmap_read(cpx, 1, n);
+		acquire_unmap_read(cpx, 1, n);
 	}
 
 	return 0;
@@ -647,12 +647,12 @@ int AcquireCamera::readLiveFrames(int& framesRead)
 	framesRead = 0;
 	VideoFrame* beg1, * end1;
 	int retries = 0;
-	cpx_map_read(cpx, 0, &beg1, &end1);
+	acquire_map_read(cpx, 0, &beg1, &end1);
 	const int maxRetries = 1000;
 	while (beg1 == end1 && retries < maxRetries)
 	{
 		retries++;
-		cpx_map_read(cpx, 0, &beg1, &end1);
+		acquire_map_read(cpx, 0, &beg1, &end1);
 		std::this_thread::sleep_for(std::chrono::milliseconds(5));
 	}
 	if (retries >= maxRetries)
@@ -667,11 +667,11 @@ int AcquireCamera::readLiveFrames(int& framesRead)
 	if (isDual())
 	{
 		retries = 0;
-		cpx_map_read(cpx, 1, &beg2, &end2);
+		acquire_map_read(cpx, 1, &beg2, &end2);
 		while ((beg2 == end2) && retries < maxRetries)
 		{
 			retries++;
-			cpx_map_read(cpx, 1, &beg2, &end2);
+			acquire_map_read(cpx, 1, &beg2, &end2);
 			std::this_thread::sleep_for(std::chrono::milliseconds(5));
 		}
 		if (retries >= maxRetries)
@@ -740,9 +740,9 @@ int AcquireCamera::readLiveFrames(int& framesRead)
 		if (isDual())
          ptr2 += beg2->bytes_of_frame;
 	}
-	cpx_unmap_read(cpx, 0, numFrames * beg1->bytes_of_frame);
+	acquire_unmap_read(cpx, 0, numFrames * beg1->bytes_of_frame);
 	if (isDual() && beg2 != nullptr)
-		cpx_unmap_read(cpx, 1, numFrames * beg2->bytes_of_frame);
+		acquire_unmap_read(cpx, 1, numFrames * beg2->bytes_of_frame);
 
 	framesRead = (int)numFrames;
 
@@ -774,7 +774,7 @@ void AcquireCamera::setupBuffers(unsigned width, unsigned height, unsigned depth
 
 int AcquireCamera::abortCpx()
 {
-	return cpx_abort(cpx);
+	return acquire_abort(cpx);
 }
 
 void AcquireCamera::generateSyntheticImage(int channel, uint8_t value)
@@ -785,9 +785,9 @@ void AcquireCamera::generateSyntheticImage(int channel, uint8_t value)
 
 int AcquireCamera::setPixelType(const char* pixType)
 {
-	CpxProperties props = {};
-	int ret = getCpxProperties(props);
-	if (ret != CpxStatus_Ok)
+	AcquireProperties props = {};
+	int ret = getAcquireProperties(props);
+	if (ret != AcquireStatus_Ok)
 		return ret;
 
 	int depth = 0;
@@ -809,8 +809,8 @@ int AcquireCamera::setPixelType(const char* pixType)
       return ERR_UNKNOWN_PIXEL_TYPE;
    }
 	// apply new settings
-	ret = cpx_configure(cpx, &props);
-	if (ret != CpxStatus_Ok)
+	ret = acquire_configure(cpx, &props);
+	if (ret != AcquireStatus_Ok)
 		return ret;
 
    return setupBuffers();
@@ -818,9 +818,9 @@ int AcquireCamera::setPixelType(const char* pixType)
 
 int AcquireCamera::getPixelType(std::string& pixType)
 {
-	CpxProperties props = {};
-	int ret = getCpxProperties(props);
-	if (ret != CpxStatus_Ok)
+	AcquireProperties props = {};
+	int ret = getAcquireProperties(props);
+	if (ret != AcquireStatus_Ok)
 		return ret;
 	if (props.video[0].camera.settings.pixel_type == SampleType_u8)
 		pixType = g_PixelType_8bit;
@@ -833,9 +833,9 @@ int AcquireCamera::getPixelType(std::string& pixType)
 
 int AcquireCamera::setBinning(int bin)
 {
-	CpxProperties props = {};
-	int ret = getCpxProperties(props);
-	if (ret != CpxStatus_Ok)
+	AcquireProperties props = {};
+	int ret = getAcquireProperties(props);
+	if (ret != AcquireStatus_Ok)
 		return ret;
 
 	for (int i = 0; i < imgs.size(); i++)
@@ -848,16 +848,16 @@ int AcquireCamera::setBinning(int bin)
 	}
 
 	// apply frame
-	ret = cpx_configure(cpx, &props);
-	if (ret != CpxStatus_Ok)
+	ret = acquire_configure(cpx, &props);
+	if (ret != AcquireStatus_Ok)
 		return ret;
 
 	ret = setupBuffers();
 	if (ret != DEVICE_OK)
 		return ret;
 
-	ret = getCpxProperties(props);
-	if (ret != CpxStatus_Ok)
+	ret = getAcquireProperties(props);
+	if (ret != AcquireStatus_Ok)
 		return ret;
 
 	// now do the binning
@@ -867,8 +867,8 @@ int AcquireCamera::setBinning(int bin)
 		props.video[i].camera.settings.shape.x = (uint32_t)(fullFrame.xSize / bin);
 		props.video[i].camera.settings.shape.y = (uint32_t)(fullFrame.ySize / bin);
 	}
-	ret = cpx_configure(cpx, &props);
-	if (ret != CpxStatus_Ok)
+	ret = acquire_configure(cpx, &props);
+	if (ret != AcquireStatus_Ok)
 		return ret;
 
 	return setupBuffers();
@@ -876,9 +876,9 @@ int AcquireCamera::setBinning(int bin)
 
 int AcquireCamera::getBinning(int& bin)
 {
-	CpxProperties props = {};
-	int ret = getCpxProperties(props);
-	if (ret != CpxStatus_Ok)
+	AcquireProperties props = {};
+	int ret = getAcquireProperties(props);
+	if (ret != AcquireStatus_Ok)
 		return ret;
 	bin = props.video[0].camera.settings.binning;
 	return DEVICE_OK;
@@ -887,10 +887,10 @@ int AcquireCamera::getBinning(int& bin)
 // Setup buffers based on the current state of the camera
 int AcquireCamera::setupBuffers()
 {
-	CpxProperties props = {};
+	AcquireProperties props = {};
 
-	int ret = getCpxProperties(props);
-	if (ret != CpxStatus_Ok)
+	int ret = getAcquireProperties(props);
+	if (ret != AcquireStatus_Ok)
 		return ret;
 
 	setupBuffers(props.video[0].camera.settings.shape.x, props.video[0].camera.settings.shape.y, props.video[0].camera.settings.pixel_type + 1, isDual());

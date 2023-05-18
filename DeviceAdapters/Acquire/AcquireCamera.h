@@ -48,8 +48,8 @@ static const char* g_PixelType_16bit = "16bit";
 
 
 extern const char* cameraName;
-struct CpxRuntime;
-struct CpxProperties;
+struct AcquireRuntime;
+struct AcquireProperties;
 class SequenceThread;
 
 class AcquireROI {
@@ -103,7 +103,7 @@ public:
 private:
 	bool initialized_;
 	static AcquireCamera* g_instance;
-	CpxRuntime* cpx;
+	AcquireRuntime* cpx;
 	std::vector<ImgBuffer> imgs;
 	bool demo;
 	std::string camera1;
@@ -114,8 +114,8 @@ private:
 	bool multiChannel;
 	AcquireROI fullFrame;
 
-	int getCpxProperties(CpxProperties& props) const;
-	int setCpxProperties(CpxProperties& props);
+	int getAcquireProperties(AcquireProperties& props) const;
+	int setAcquireProperties(AcquireProperties& props);
 	static void reporter(int is_error, const char* file, int line, const char* function, const char* msg);
 	int readSnapImageFrames();
 	int readLiveFrames(int& framesRead);
