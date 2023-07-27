@@ -27,6 +27,7 @@
 #include <chrono>
 #include <thread>
 #include "SequenceThread.h"
+#include "boost/filesystem.hpp"
 
 
 /// Helper for passing size static strings as function args.
@@ -54,11 +55,11 @@ size_t ConsumedBytes (const VideoFrame* const cur, const VideoFrame* const end)
 		return (uint8_t*)end - (uint8_t*)cur;
 };
 
-
 AcquireCamera::AcquireCamera() :
 	initialized_(false),
 	demo(true),
 	saveToZarr(false),
+	softwareTriggerId(-1),
 	stopOnOverflow(false),
 	currentCamera(0),
 	multiChannel(MULTI_CHANNEL),
@@ -66,9 +67,9 @@ AcquireCamera::AcquireCamera() :
 {
 	// instantiate cpx
 	g_instance = this;
-	cpx = acquire_init(AcquireCamera::reporter);
-	auto dm = acquire_device_manager(cpx);
-	if (!cpx || !dm)
+	runtime = acquire_init(AcquireCamera::reporter);
+	auto dm = acquire_device_manager(runtime);
+	if (!runtime || !dm)
 	{
 		g_instance = nullptr;
 		LogMessage("CPX initialize failed");
@@ -158,9 +159,9 @@ int AcquireCamera::Initialize()
 
 	// test cpx loading
 	g_instance = this;
-	cpx = acquire_init(AcquireCamera::reporter);
-	auto dm = acquire_device_manager(cpx);
-	if (!cpx || !dm)
+	runtime = acquire_init(AcquireCamera::reporter);
+	auto dm = acquire_device_manager(runtime);
+	if (!runtime || !dm)
 	{
 		g_instance = nullptr;
 		return ERR_CPX_INIT;
@@ -193,7 +194,7 @@ int AcquireCamera::Initialize()
 		SIZED("Trash"),
 		&props.video[1].storage.identifier);
 
-	ret = acquire_configure(cpx, &props);
+	ret = acquire_configure(runtime, &props);
 	if (ret != AcquireStatus_Ok)
 		return ret;
 
@@ -205,9 +206,28 @@ int AcquireCamera::Initialize()
 
 	// get metatadata
 	AcquirePropertyMetadata meta = {};
-	ret = acquire_get_configuration_metadata(cpx, &meta);
+	ret = acquire_get_configuration_metadata(runtime, &meta);
 	if (ret != AcquireStatus_Ok)
 		return ret;
+
+	// software trigger
+	softwareTriggerId = getSoftwareTrigger(meta, 0);
+	if (isDual())
+	{
+		// second trigger has to be the same as first
+		int trigId = getSoftwareTrigger(meta, 1);
+		if (trigId != softwareTriggerId)
+			return ERR_SOFTWARE_TRIGGER_NOT_AVAILABLE;
+	}
+
+	// we will support only cameras with software trigger capabilities
+	if (softwareTriggerId == -1)
+		return ERR_SOFTWARE_TRIGGER_NOT_AVAILABLE;
+	
+	//props.video[0].camera.settings.input_triggers.frame_start.enable = 1;
+	props.video[0].camera.settings.input_triggers.frame_start.line = softwareTriggerId;
+	//props.video[1].camera.settings.input_triggers.frame_start.enable = 1;
+	props.video[1].camera.settings.input_triggers.frame_start.line = softwareTriggerId;
 
 	props.video[0].camera.settings.binning = 1;
 	if (demo)
@@ -216,6 +236,7 @@ int AcquireCamera::Initialize()
 	else
 		// for actual cameras use the values from the metadata
 		props.video[0].camera.settings.shape = { (unsigned)meta.video[0].camera.shape.x.high, (unsigned)meta.video[0].camera.shape.y.high };
+	
 	props.video[0].camera.settings.offset = { 0, 0 };
 	props.video[0].max_frame_count = 1;
 	props.video[0].camera.settings.exposure_time_us = 20000;
@@ -237,7 +258,10 @@ int AcquireCamera::Initialize()
       fullFrame.ySize = (int)meta.video[0].camera.shape.y.high;
    }
 
-	ret = acquire_configure(cpx, &props);
+	props.video[0].max_frame_count = MAXUINT64;
+	props.video[1].max_frame_count = MAXUINT64;
+
+	ret = acquire_configure(runtime, &props);
 	if (ret != AcquireStatus_Ok)
 		return ret;
 
@@ -246,6 +270,12 @@ int AcquireCamera::Initialize()
 	ret = getAcquireProperties(props);
 	if (ret != AcquireStatus_Ok)
 		return ret;
+
+	acquire_map_read(runtime, 0, nullptr, nullptr);
+	acquire_map_read(runtime, 1, nullptr, nullptr);
+	ret = acquire_start(runtime);
+	if (ret != AcquireStatus_Ok)
+		throw std::exception("acquire_start failed");
 
 	// binning
 	pAct = new CPropertyAction(this, &AcquireCamera::OnBinning);
@@ -276,6 +306,26 @@ int AcquireCamera::Initialize()
 	if (ret != DEVICE_OK)
 		return ret;
 
+	// zarr save
+	pAct = new CPropertyAction(this, &AcquireCamera::OnSaveToZarr);
+	ret = CreateProperty(g_prop_SaveToZarr, "0", MM::Integer, false, pAct);
+	if (ret != DEVICE_OK)
+		return ret;
+	vector<string> zarrSaveValues = {"0", "1"};
+	SetAllowedValues(g_prop_SaveToZarr, zarrSaveValues);
+
+	// zarr save root
+	pAct = new CPropertyAction(this, &AcquireCamera::OnSaveRoot);
+	ret = CreateProperty(g_prop_SaveRoot, saveRoot.c_str(), MM::String, false, pAct);
+	if (ret != DEVICE_OK)
+		return ret;
+
+	// zarr save prefix
+	pAct = new CPropertyAction(this, &AcquireCamera::OnSavePrefix);
+	ret = CreateProperty(g_prop_SavePrefix, savePrefix.c_str(), MM::String, false, pAct);
+	if (ret != DEVICE_OK)
+		return ret;
+
 	setupBuffers(props.video[0].camera.settings.shape.x, props.video[0].camera.settings.shape.y, props.video[0].camera.settings.pixel_type + 1, isDual());
 
 	initialized_ = true;
@@ -287,12 +337,12 @@ int AcquireCamera::Shutdown()
 	liveThread->Stop();
 	liveThread->wait();
 
-	if (cpx)
+	if (runtime)
 	{
-		auto ret = acquire_shutdown(cpx);
+		auto ret = acquire_shutdown(runtime);
 		if (ret != AcquireStatus_Ok)
-			LogMessage("cpx_shutdown error: " + ret);
-		cpx = nullptr;
+			LogMessage("acquire_shutdown error: " + ret);
+		runtime = nullptr;
 		g_instance = nullptr;
 	}
 
@@ -333,7 +383,7 @@ void AcquireCamera::SetExposure(double exposure)
 	if (ret != DEVICE_OK)
 		LogMessage("Error obtaining properties: code=" + ret);
 
-	auto dm = acquire_device_manager(cpx);
+	auto dm = acquire_device_manager(runtime);
 
 	ret = device_manager_select(dm, DeviceKind_Camera, camera1.c_str(), camera1.size(), &props.video[0].camera.identifier);
 	if (ret != AcquireStatus_Ok)
@@ -382,7 +432,7 @@ int AcquireCamera::SetROI(unsigned x, unsigned y, unsigned xSize, unsigned ySize
 		props.video[i].camera.settings.offset.y = ySize;
 	}
 
-	ret = acquire_configure(cpx, &props);
+	ret = acquire_configure(runtime, &props);
 	if (ret != AcquireStatus_Ok)
 		return ret;
 
@@ -419,7 +469,7 @@ int AcquireCamera::ClearROI()
 		props.video[i].camera.settings.offset.y = fullFrame.y;
 	}
 
-	ret = acquire_configure(cpx, &props);
+	ret = acquire_configure(runtime, &props);
 	if (ret != AcquireStatus_Ok)
 		return ret;
 
@@ -488,32 +538,15 @@ unsigned AcquireCamera::GetImageBytesPerPixel() const
 
 int AcquireCamera::SnapImage()
 {
-	AcquireProperties props = {};
-	getAcquireProperties(props);
-	auto dm = acquire_device_manager(cpx);
+	AcquireStatusCode aret = acquire_execute_trigger(runtime, 0);
+	if (aret != AcquireStatusCode::AcquireStatus_Ok)
+		return aret;
 
-	// make sure we are acquiring only one frame
-	props.video[0].max_frame_count = 1;
-	if (isDual())
-	{
-		props.video[1].max_frame_count = 1;
-	}
+	aret = acquire_execute_trigger(runtime, 1);
+	if (aret != AcquireStatusCode::AcquireStatus_Ok)
+		return aret;
 
-	int ret = acquire_configure(cpx, &props);
-	if (ret != AcquireStatus_Ok)
-	{
-		LogMessage("cpx_configure failed");
-		return ERR_CPX_CONFIURE_FAILED;
-	}
-
-	// start single frame
-	ret = acquire_start(cpx);
-	if (ret != AcquireStatus_Ok)
-		throw std::exception("cpx_start failed");
-
-	ret = readSnapImageFrames();
-	acquire_stop(cpx);
-	
+	int ret = readSnapImageFrames();
 	if (ret != DEVICE_OK)
 		return ret;
 
@@ -536,14 +569,14 @@ int AcquireCamera::StartSequenceAcquisition(long numImages, double interval_ms, 
 	props.video[0].max_frame_count = numImages == 0 ? MAXUINT64 : numImages;
 	props.video[1].max_frame_count = numImages == 0 ? MAXUINT64 : numImages;
 
-	ret = acquire_configure(cpx, &props);
+	ret = acquire_configure(runtime, &props);
 	if (ret != AcquireStatus_Ok)
 	{
 		LogMessage("cpx_configure failed");
 		return ERR_CPX_CONFIURE_FAILED;
 	}
 
-	ret = acquire_start(cpx);
+	ret = acquire_start(runtime);
 	if (ret != AcquireStatus_Ok)
 		return ret;
 
@@ -572,12 +605,12 @@ bool AcquireCamera::IsCapturing()
 int AcquireCamera::getAcquireProperties(AcquireProperties& props) const
 {
 	props = {};
-	return acquire_get_configuration(cpx, &props);
+	return acquire_get_configuration(runtime, &props);
 }
 
 int AcquireCamera::setAcquireProperties(AcquireProperties& props)
 {
-	return acquire_configure(cpx, &props);
+	return acquire_configure(runtime, &props);
 }
 
 // Send message to micro-manager log
@@ -604,13 +637,13 @@ int AcquireCamera::readSnapImageFrames()
 {
 	VideoFrame* beg, * end;
 	// read first frame and place it in the first image buffer
-	acquire_map_read(cpx, 0, &beg, &end);
+	acquire_map_read(runtime, 0, &beg, &end);
 	int retries = 0;
 	const int maxRetries = 1000;
 	while (beg == end && retries < maxRetries)
 	{
 		retries++;
-		acquire_map_read(cpx, 0, &beg, &end);
+		acquire_map_read(runtime, 0, &beg, &end);
 		std::this_thread::sleep_for(std::chrono::milliseconds(5));
 	}
 	if (retries >= maxRetries)
@@ -618,16 +651,16 @@ int AcquireCamera::readSnapImageFrames()
 
 	memcpy(imgs[0].GetPixelsRW(), beg->data, beg->bytes_of_frame - sizeof(VideoFrame));
 	uint32_t n = (uint32_t)ConsumedBytes(beg, end);
-	acquire_unmap_read(cpx, 0, n);
+	acquire_unmap_read(runtime, 0, n);
 
 	// read second frame
 	if (imgs.size() > 1) {
-		acquire_map_read(cpx, 1, &beg, &end);
+		acquire_map_read(runtime, 1, &beg, &end);
 		retries = 0;
 		while (beg == end && retries < maxRetries)
 		{
 			retries++;
-			acquire_map_read(cpx, 1, &beg, &end);
+			acquire_map_read(runtime, 1, &beg, &end);
 			std::this_thread::sleep_for(std::chrono::milliseconds(5));
 		}
 		if (retries >= maxRetries)
@@ -635,7 +668,7 @@ int AcquireCamera::readSnapImageFrames()
 
 		memcpy(imgs[1].GetPixelsRW(), beg->data, beg->bytes_of_frame - sizeof(VideoFrame));
 		n = (uint32_t)ConsumedBytes(beg, end);
-		acquire_unmap_read(cpx, 1, n);
+		acquire_unmap_read(runtime, 1, n);
 	}
 
 	return 0;
@@ -653,12 +686,12 @@ int AcquireCamera::readLiveFrames(int& framesRead)
 	framesRead = 0;
 	VideoFrame* beg1, * end1;
 	int retries = 0;
-	acquire_map_read(cpx, 0, &beg1, &end1);
+	acquire_map_read(runtime, 0, &beg1, &end1);
 	const int maxRetries = 1000;
 	while (beg1 == end1 && retries < maxRetries)
 	{
 		retries++;
-		acquire_map_read(cpx, 0, &beg1, &end1);
+		acquire_map_read(runtime, 0, &beg1, &end1);
 		std::this_thread::sleep_for(std::chrono::milliseconds(5));
 	}
 	if (retries >= maxRetries)
@@ -673,11 +706,11 @@ int AcquireCamera::readLiveFrames(int& framesRead)
 	if (isDual())
 	{
 		retries = 0;
-		acquire_map_read(cpx, 1, &beg2, &end2);
+		acquire_map_read(runtime, 1, &beg2, &end2);
 		while ((beg2 == end2) && retries < maxRetries)
 		{
 			retries++;
-			acquire_map_read(cpx, 1, &beg2, &end2);
+			acquire_map_read(runtime, 1, &beg2, &end2);
 			std::this_thread::sleep_for(std::chrono::milliseconds(5));
 		}
 		if (retries >= maxRetries)
@@ -746,9 +779,9 @@ int AcquireCamera::readLiveFrames(int& framesRead)
 		if (isDual())
          ptr2 += beg2->bytes_of_frame;
 	}
-	acquire_unmap_read(cpx, 0, numFrames * beg1->bytes_of_frame);
+	acquire_unmap_read(runtime, 0, numFrames * beg1->bytes_of_frame);
 	if (isDual() && beg2 != nullptr)
-		acquire_unmap_read(cpx, 1, numFrames * beg2->bytes_of_frame);
+		acquire_unmap_read(runtime, 1, numFrames * beg2->bytes_of_frame);
 
 	framesRead = (int)numFrames;
 
@@ -780,7 +813,7 @@ void AcquireCamera::setupBuffers(unsigned width, unsigned height, unsigned depth
 
 int AcquireCamera::abortCpx()
 {
-	return acquire_abort(cpx);
+	return acquire_abort(runtime);
 }
 
 void AcquireCamera::generateSyntheticImage(int channel, uint8_t value)
@@ -815,7 +848,7 @@ int AcquireCamera::setPixelType(const char* pixType)
       return ERR_UNKNOWN_PIXEL_TYPE;
    }
 	// apply new settings
-	ret = acquire_configure(cpx, &props);
+	ret = acquire_configure(runtime, &props);
 	if (ret != AcquireStatus_Ok)
 		return ret;
 
@@ -854,7 +887,7 @@ int AcquireCamera::setBinning(int bin)
 	}
 
 	// apply frame
-	ret = acquire_configure(cpx, &props);
+	ret = acquire_configure(runtime, &props);
 	if (ret != AcquireStatus_Ok)
 		return ret;
 
@@ -873,7 +906,7 @@ int AcquireCamera::setBinning(int bin)
 		props.video[i].camera.settings.shape.x = (uint32_t)(fullFrame.xSize / bin);
 		props.video[i].camera.settings.shape.y = (uint32_t)(fullFrame.ySize / bin);
 	}
-	ret = acquire_configure(cpx, &props);
+	ret = acquire_configure(runtime, &props);
 	if (ret != AcquireStatus_Ok)
 		return ret;
 
@@ -901,6 +934,44 @@ int AcquireCamera::setupBuffers()
 
 	setupBuffers(props.video[0].camera.settings.shape.x, props.video[0].camera.settings.shape.y, props.video[0].camera.settings.pixel_type + 1, isDual());
 	return DEVICE_OK;
+}
+
+int AcquireCamera::enterZarrSave()
+{
+	if (IsCapturing())
+		return DEVICE_CAMERA_BUSY_ACQUIRING;
+
+	// create file name
+	auto savePrefixTmp(savePrefix);
+	string fileName = saveRoot + "/" + savePrefixTmp;
+	int counter(1);
+	while (boost::filesystem::exists(fileName))
+	{
+		savePrefixTmp = savePrefix + "_" + to_string(counter++);
+		fileName = saveRoot + "/" + savePrefixTmp;
+	}
+	currentFileName = fileName;
+
+	return DEVICE_OK;
+}
+
+int AcquireCamera::exitZarrSave()
+{
+	return DEVICE_OK;
+}
+
+int AcquireCamera::getSoftwareTrigger(AcquirePropertyMetadata& meta, int stream)
+{
+	int line = -1;
+	for (int i = 0; i < meta.video[stream].camera.digital_lines.line_count; ++i)
+	{
+		if (strcmp(meta.video[stream].camera.digital_lines.names[i], "software")) {
+			line = i;
+			break;
+		}
+	}
+
+	return line;
 }
 
 //////////////////////////////////////////////////////////////////////////////////////////////
@@ -967,6 +1038,64 @@ int AcquireCamera::OnBinning(MM::PropertyBase* pProp, MM::ActionType eAct)
 		long bin;
 		pProp->Get(bin);
 		int ret = setBinning((int)bin);
+	}
+
+	return DEVICE_OK;
+}
+
+int AcquireCamera::OnSaveToZarr(MM::PropertyBase* pProp, MM::ActionType eAct)
+{
+	if (eAct == MM::BeforeGet)
+	{
+		pProp->Set(saveToZarr ? 1L : 0L);
+	}
+	else if (eAct == MM::AfterSet)
+	{
+		long val;
+		pProp->Get(val);
+		if (val && !saveToZarr) {
+			int ret = enterZarrSave();
+			if (ret != DEVICE_OK)
+				return ret;
+			saveToZarr = true;
+		}
+		else if (!val && saveToZarr)
+		{
+			int ret = exitZarrSave();
+			if (ret != DEVICE_OK)
+				return ret;
+			saveToZarr = false;
+		}
+
+		return DEVICE_OK;
+	}
+
+	return DEVICE_OK;
+}
+
+int AcquireCamera::OnSaveRoot(MM::PropertyBase* pProp, MM::ActionType eAct)
+{
+	if (eAct == MM::BeforeGet)
+	{
+		pProp->Set(saveRoot.c_str());
+	}
+	else if (eAct == MM::AfterSet)
+	{
+		pProp->Get(saveRoot);
+	}
+
+	return DEVICE_OK;
+}
+
+int AcquireCamera::OnSavePrefix(MM::PropertyBase* pProp, MM::ActionType eAct)
+{
+	if (eAct == MM::BeforeGet)
+	{
+		pProp->Set(savePrefix.c_str());
+	}
+	else if (eAct == MM::AfterSet)
+	{
+		pProp->Get(savePrefix);
 	}
 
 	return DEVICE_OK;
