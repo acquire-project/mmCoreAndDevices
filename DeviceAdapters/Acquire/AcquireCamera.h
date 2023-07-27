@@ -106,6 +106,9 @@ private:
 	AcquireRuntime* cpx;
 	std::vector<ImgBuffer> imgs;
 	bool demo;
+	bool saveToZarr;
+	std::string saveRoot;
+	std::string savePrefix;
 	std::string camera1;
 	std::string camera2;
 	SequenceThread* liveThread;

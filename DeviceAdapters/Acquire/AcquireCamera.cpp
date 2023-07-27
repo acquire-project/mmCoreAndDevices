@@ -56,7 +56,13 @@ size_t ConsumedBytes (const VideoFrame* const cur, const VideoFrame* const end)
 
 
 AcquireCamera::AcquireCamera() :
-	initialized_(false), demo(true), stopOnOverflow(false), currentCamera(0), multiChannel(MULTI_CHANNEL), liveThread(nullptr)
+	initialized_(false),
+	demo(true),
+	saveToZarr(false),
+	stopOnOverflow(false),
+	currentCamera(0),
+	multiChannel(MULTI_CHANNEL),
+	liveThread(nullptr)
 {
 	// instantiate cpx
 	g_instance = this;
