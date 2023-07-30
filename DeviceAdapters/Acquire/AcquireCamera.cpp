@@ -275,7 +275,7 @@ int AcquireCamera::Initialize()
 	acquire_map_read(runtime, 1, nullptr, nullptr);
 	ret = acquire_start(runtime);
 	if (ret != AcquireStatus_Ok)
-		throw std::exception("acquire_start failed");
+		return ret;
 
 	// binning
 	pAct = new CPropertyAction(this, &AcquireCamera::OnBinning);
@@ -941,6 +941,9 @@ int AcquireCamera::enterZarrSave()
 	if (IsCapturing())
 		return DEVICE_CAMERA_BUSY_ACQUIRING;
 
+	// stop current acquisition
+	acquire_abort(runtime);
+
 	// create file name
 	auto savePrefixTmp(savePrefix);
 	string fileName = saveRoot + "/" + savePrefixTmp;
@@ -952,11 +955,81 @@ int AcquireCamera::enterZarrSave()
 	}
 	currentFileName = fileName;
 
+	AcquireProperties props = {};
+	int ret = getAcquireProperties(props);
+	if (ret != AcquireStatus_Ok)
+		return ret;
+
+	auto dm = acquire_device_manager(runtime);
+	if (!runtime || !dm)
+	{
+		g_instance = nullptr;
+		return ERR_CPX_INIT;
+	}
+
+	device_manager_select(dm,
+		DeviceKind_Storage,
+		SIZED("zarr"),
+		&props.video[0].storage.identifier);
+
+	device_manager_select(dm,
+		DeviceKind_Storage,
+		SIZED("zarr"),
+		&props.video[1].storage.identifier);
+
+	setFileName(props, 0, currentFileName);
+	setFileName(props, 1, currentFileName);
+
+	ret = acquire_configure(runtime, &props);
+	if (ret != AcquireStatus_Ok)
+		return ret;
+
+	ret = acquire_start(runtime);
+	if (ret != AcquireStatus_Ok)
+		return ret;
+
+
 	return DEVICE_OK;
 }
 
 int AcquireCamera::exitZarrSave()
 {
+	if (IsCapturing())
+		return DEVICE_CAMERA_BUSY_ACQUIRING;
+
+	// stop current acquisition
+	acquire_abort(runtime);
+
+	AcquireProperties props = {};
+	int ret = getAcquireProperties(props);
+	if (ret != AcquireStatus_Ok)
+		return ret;
+
+	auto dm = acquire_device_manager(runtime);
+	if (!runtime || !dm)
+	{
+		g_instance = nullptr;
+		return ERR_CPX_INIT;
+	}
+
+	device_manager_select(dm,
+		DeviceKind_Storage,
+		SIZED("Trash"),
+		&props.video[0].storage.identifier);
+
+	device_manager_select(dm,
+		DeviceKind_Storage,
+		SIZED("Trash"),
+		&props.video[1].storage.identifier);
+
+	ret = acquire_configure(runtime, &props);
+	if (ret != AcquireStatus_Ok)
+		return ret;
+
+	ret = acquire_start(runtime);
+	if (ret != AcquireStatus_Ok)
+		return ret;
+
 	return DEVICE_OK;
 }
 
@@ -972,6 +1045,14 @@ int AcquireCamera::getSoftwareTrigger(AcquirePropertyMetadata& meta, int stream)
 	}
 
 	return line;
+}
+
+void setFileName(AcquireProperties props, int stream, const std::string& fileName)
+{
+	props.video[stream].storage.settings.filename.str = (char*)malloc(fileName.size() + 1);
+	memset(props.video[stream].storage.settings.filename.str, 0, fileName.size() + 1);
+	props.video[stream].storage.settings.filename.nbytes = fileName.size() + 1;
+	strcpy(props.video[stream].storage.settings.filename.str, fileName.c_str());
 }
 
 //////////////////////////////////////////////////////////////////////////////////////////////
