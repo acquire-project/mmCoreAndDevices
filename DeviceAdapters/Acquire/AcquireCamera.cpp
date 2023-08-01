@@ -44,6 +44,7 @@ const int DEMO_IMAGE_HEIGHT = 240;
 const int DEMO_IMAGE_DEPTH = 1;
 
 const bool MULTI_CHANNEL = true;
+const char* outStreamId = "zarr";
 
 const VideoFrame* next(VideoFrame* cur)
 {
@@ -273,6 +274,8 @@ int AcquireCamera::Initialize()
 
 	acquire_map_read(runtime, 0, nullptr, nullptr);
 	acquire_map_read(runtime, 1, nullptr, nullptr);
+
+	// START acquiring
 	ret = acquire_start(runtime);
 	if (ret != AcquireStatus_Ok)
 		return ret;
@@ -938,6 +941,7 @@ int AcquireCamera::setupBuffers()
 
 int AcquireCamera::enterZarrSave()
 {
+	// TODO: enable zarr save switch during live video
 	if (IsCapturing())
 		return DEVICE_CAMERA_BUSY_ACQUIRING;
 
@@ -969,12 +973,12 @@ int AcquireCamera::enterZarrSave()
 
 	device_manager_select(dm,
 		DeviceKind_Storage,
-		SIZED("zarr"),
+		SIZED(outStreamId),
 		&props.video[0].storage.identifier);
 
 	device_manager_select(dm,
 		DeviceKind_Storage,
-		SIZED("zarr"),
+		SIZED(outStreamId),
 		&props.video[1].storage.identifier);
 
 	setFileName(props, 0, currentFileName);
@@ -1047,12 +1051,18 @@ int AcquireCamera::getSoftwareTrigger(AcquirePropertyMetadata& meta, int stream)
 	return line;
 }
 
+/**
+ * Assigns file name for the output stream 
+ */
 void setFileName(AcquireProperties props, int stream, const std::string& fileName)
 {
 	props.video[stream].storage.settings.filename.str = (char*)malloc(fileName.size() + 1);
-	memset(props.video[stream].storage.settings.filename.str, 0, fileName.size() + 1);
-	props.video[stream].storage.settings.filename.nbytes = fileName.size() + 1;
-	strcpy(props.video[stream].storage.settings.filename.str, fileName.c_str());
+	if (props.video[stream].storage.settings.filename.str)
+	{
+		memset(props.video[stream].storage.settings.filename.str, 0, fileName.size() + 1);
+		props.video[stream].storage.settings.filename.nbytes = fileName.size() + 1;
+		strncpy(props.video[stream].storage.settings.filename.str, fileName.c_str(), fileName.size());
+	}
 }
 
 //////////////////////////////////////////////////////////////////////////////////////////////
