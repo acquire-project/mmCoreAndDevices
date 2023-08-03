@@ -1054,7 +1054,7 @@ int AcquireCamera::getSoftwareTrigger(AcquirePropertyMetadata& meta, int stream)
 /**
  * Assigns file name for the output stream 
  */
-void setFileName(AcquireProperties props, int stream, const std::string& fileName)
+void AcquireCamera::setFileName(AcquireProperties props, int stream, const std::string& fileName)
 {
 	props.video[stream].storage.settings.filename.str = (char*)malloc(fileName.size() + 1);
 	if (props.video[stream].storage.settings.filename.str)
