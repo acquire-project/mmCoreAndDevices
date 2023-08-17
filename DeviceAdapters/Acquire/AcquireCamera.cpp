@@ -225,9 +225,10 @@ int AcquireCamera::Initialize()
 	if (softwareTriggerId == -1)
 		return ERR_SOFTWARE_TRIGGER_NOT_AVAILABLE;
 	
-	//props.video[0].camera.settings.input_triggers.frame_start.enable = 1;
+	props.video[0].camera.settings.input_triggers.frame_start.enable = 1;
 	props.video[0].camera.settings.input_triggers.frame_start.line = softwareTriggerId;
-	//props.video[1].camera.settings.input_triggers.frame_start.enable = 1;
+	
+	props.video[1].camera.settings.input_triggers.frame_start.enable = 1;
 	props.video[1].camera.settings.input_triggers.frame_start.line = softwareTriggerId;
 
 	props.video[0].camera.settings.binning = 1;
@@ -272,8 +273,9 @@ int AcquireCamera::Initialize()
 	if (ret != AcquireStatus_Ok)
 		return ret;
 
-	acquire_map_read(runtime, 0, nullptr, nullptr);
-	acquire_map_read(runtime, 1, nullptr, nullptr);
+	VideoFrame* beg, * end;
+	acquire_map_read(runtime, 0, &beg, &end);
+	acquire_map_read(runtime, 1, &beg, &end);
 
 	// START acquiring
 	ret = acquire_start(runtime);
@@ -640,7 +642,11 @@ int AcquireCamera::readSnapImageFrames()
 {
 	VideoFrame* beg, * end;
 	// read first frame and place it in the first image buffer
-	acquire_map_read(runtime, 0, &beg, &end);
+	auto scode = acquire_map_read(runtime, 0, &beg, &end);
+	if (scode != AcquireStatus_Ok)
+		return scode;
+	// TODO: check other instances
+
 	int retries = 0;
 	const int maxRetries = 1000;
 	while (beg == end && retries < maxRetries)
