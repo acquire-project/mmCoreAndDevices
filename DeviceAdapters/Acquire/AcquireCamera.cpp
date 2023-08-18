@@ -44,7 +44,7 @@ const int DEMO_IMAGE_HEIGHT = 240;
 const int DEMO_IMAGE_DEPTH = 1;
 
 const bool MULTI_CHANNEL = true;
-const char* outStreamId = "zarr";
+const std::string outStreamId("Zarr");
 
 const VideoFrame* next(VideoFrame* cur)
 {
@@ -976,15 +976,15 @@ int AcquireCamera::enterZarrSave()
 		g_instance = nullptr;
 		return ERR_CPX_INIT;
 	}
-
+	
 	device_manager_select(dm,
 		DeviceKind_Storage,
-		SIZED(outStreamId),
+		outStreamId.c_str(), outStreamId.size(),
 		&props.video[0].storage.identifier);
 
 	device_manager_select(dm,
 		DeviceKind_Storage,
-		SIZED(outStreamId),
+		outStreamId.c_str(), outStreamId.size(),
 		&props.video[1].storage.identifier);
 
 	setFileName(props, 0, currentFileName);
@@ -1048,7 +1048,7 @@ int AcquireCamera::getSoftwareTrigger(AcquirePropertyMetadata& meta, int stream)
 	int line = -1;
 	for (int i = 0; i < meta.video[stream].camera.digital_lines.line_count; ++i)
 	{
-		if (strcmp(meta.video[stream].camera.digital_lines.names[i], "software")) {
+		if (strcmp(meta.video[stream].camera.digital_lines.names[i], "software") == 0) {
 			line = i;
 			break;
 		}
@@ -1060,15 +1060,11 @@ int AcquireCamera::getSoftwareTrigger(AcquirePropertyMetadata& meta, int stream)
 /**
  * Assigns file name for the output stream 
  */
-void AcquireCamera::setFileName(AcquireProperties props, int stream, const std::string& fileName)
+void AcquireCamera::setFileName(AcquireProperties& props, int stream, const std::string& fileName)
 {
-	props.video[stream].storage.settings.filename.str = (char*)malloc(fileName.size() + 1);
-	if (props.video[stream].storage.settings.filename.str)
-	{
-		memset(props.video[stream].storage.settings.filename.str, 0, fileName.size() + 1);
-		props.video[stream].storage.settings.filename.nbytes = fileName.size() + 1;
-		strncpy(props.video[stream].storage.settings.filename.str, fileName.c_str(), fileName.size());
-	}
+	// Metadata is null because we don't have access to Summary metdata from the acq engine
+	// that includes pixel size
+	storage_properties_init(&props.video[stream].storage.settings, 0, fileName.c_str(), fileName.size() + 1, nullptr, 0, { 1.0, 1.0 });
 }
 
 //////////////////////////////////////////////////////////////////////////////////////////////

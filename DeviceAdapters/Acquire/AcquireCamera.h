@@ -144,5 +144,5 @@ private:
 	int enterZarrSave();
 	int exitZarrSave();
 	int getSoftwareTrigger(AcquirePropertyMetadata& meta, int stream);
-	static void setFileName(AcquireProperties props, int stream, const std::string& fileName);
+	static void setFileName(AcquireProperties& props, int stream, const std::string& fileName);
 };
