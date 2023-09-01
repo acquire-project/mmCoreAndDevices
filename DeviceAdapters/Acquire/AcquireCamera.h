@@ -28,16 +28,17 @@
 #include "ImgBuffer.h"
 
 #define ERR_INVALID_DEVICE_NAME 90000
-#define ERR_CPX_INIT 90001
-#define ERR_CPX_CONFIURE_FAILED 90002
+#define ERR_ACQ_INIT 90001
+#define ERR_ACQ_CONFIURE_FAILED 90002
 #define ERR_UNSUPPORTED_PIXEL_TYPE 90003
 #define ERR_INVALID_CAMERA_SELECTION 90004
 #define ERR_UNKNOWN_LIVE 90005
 #define ERR_TIMEOUT 90006
-#define ERR_CPX_MISSED_FRAME 90007
-#define ERR_CPX_TIMEOUT 90008
+#define ERR_ACQ_MISSED_FRAME 90007
+#define ERR_ACQ_TIMEOUT 90008
 #define ERR_UNKNOWN_PIXEL_TYPE 90009
 #define ERR_SOFTWARE_TRIGGER_NOT_AVAILABLE 90010
+#define ERR_FAILED_CREATING_ACQ_DIR 90011
 
 static const char* g_prop_CurrentDevice = "Device";
 static const char* g_prop_SaveToZarr = "SaveToZarr";
@@ -117,7 +118,7 @@ private:
 	bool saveToZarr;
 	std::string saveRoot;
 	std::string savePrefix;
-	std::string currentFileName;
+	std::string currentDirName;
 	std::string camera1;
 	std::string camera2;
 	SequenceThread* liveThread;

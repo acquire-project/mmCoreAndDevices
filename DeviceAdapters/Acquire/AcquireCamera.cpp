@@ -44,7 +44,8 @@ const int DEMO_IMAGE_HEIGHT = 240;
 const int DEMO_IMAGE_DEPTH = 1;
 
 const bool MULTI_CHANNEL = true;
-const std::string outStreamId("Zarr");
+// const std::string outStreamId("Zarr");
+const std::string outStreamId("tiff");
 
 const VideoFrame* next(VideoFrame* cur)
 {
@@ -165,7 +166,7 @@ int AcquireCamera::Initialize()
 	if (!runtime || !dm)
 	{
 		g_instance = nullptr;
-		return ERR_CPX_INIT;
+		return ERR_ACQ_INIT;
 	}
 
 	AcquireProperties props = {};
@@ -567,19 +568,23 @@ int AcquireCamera::StartSequenceAcquisition(long numImages, double interval_ms, 
 	if (ret != DEVICE_OK)
 		return ret;
 
+	ret = acquire_abort(runtime);
+	if (ret != AcquireStatus_Ok)
+		return ret;
 
+	// switch to hardware trigger
 	AcquireProperties props = {};
 	getAcquireProperties(props);
 
 	props.video[0].max_frame_count = numImages == 0 ? MAXUINT64 : numImages;
 	props.video[1].max_frame_count = numImages == 0 ? MAXUINT64 : numImages;
 
+	props.video[0].camera.settings.input_triggers.frame_start.enable = 0;
+	props.video[1].camera.settings.input_triggers.frame_start.enable = 0;
+
 	ret = acquire_configure(runtime, &props);
 	if (ret != AcquireStatus_Ok)
-	{
-		LogMessage("cpx_configure failed");
-		return ERR_CPX_CONFIURE_FAILED;
-	}
+		return ERR_ACQ_CONFIURE_FAILED;
 
 	ret = acquire_start(runtime);
 	if (ret != AcquireStatus_Ok)
@@ -598,6 +603,34 @@ int AcquireCamera::StopSequenceAcquisition()
 
 	liveThread->Stop();
 	liveThread->wait();
+
+	int ret = acquire_abort(runtime);
+	if (ret != AcquireStatus_Ok)
+		return ret;
+
+	// switch back to s/w trigger
+	AcquireProperties props = {};
+	getAcquireProperties(props);
+
+	props.video[0].max_frame_count = MAXUINT64;
+	props.video[1].max_frame_count = MAXUINT64;
+
+	props.video[0].camera.settings.input_triggers.frame_start.enable = 1;
+	props.video[0].camera.settings.input_triggers.frame_start.line = softwareTriggerId;
+
+	props.video[1].camera.settings.input_triggers.frame_start.enable = 1;
+	props.video[1].camera.settings.input_triggers.frame_start.line = softwareTriggerId;
+
+	ret = acquire_configure(runtime, &props);
+	if (ret != AcquireStatus_Ok)
+		return ERR_ACQ_CONFIURE_FAILED;
+
+	ret = acquire_start(runtime);
+	if (ret != AcquireStatus_Ok)
+		return ret;
+
+	LogMessage("Ended sequence acquisition.");
+
 
 	return DEVICE_OK;
 }
@@ -947,7 +980,6 @@ int AcquireCamera::setupBuffers()
 
 int AcquireCamera::enterZarrSave()
 {
-	// TODO: enable zarr save switch during live video
 	if (IsCapturing())
 		return DEVICE_CAMERA_BUSY_ACQUIRING;
 
@@ -956,14 +988,17 @@ int AcquireCamera::enterZarrSave()
 
 	// create file name
 	auto savePrefixTmp(savePrefix);
-	string fileName = saveRoot + "/" + savePrefixTmp;
+	string dirName = saveRoot + "/" + savePrefixTmp;
 	int counter(1);
-	while (boost::filesystem::exists(fileName))
+	while (boost::filesystem::exists(dirName))
 	{
 		savePrefixTmp = savePrefix + "_" + to_string(counter++);
-		fileName = saveRoot + "/" + savePrefixTmp;
+		dirName = saveRoot + "/" + savePrefixTmp;
 	}
-	currentFileName = fileName;
+	currentDirName = dirName;
+	boost::system::error_code errCode;
+	if (!boost::filesystem::create_directory(currentDirName, errCode))
+		return ERR_FAILED_CREATING_ACQ_DIR;
 
 	AcquireProperties props = {};
 	int ret = getAcquireProperties(props);
@@ -974,7 +1009,7 @@ int AcquireCamera::enterZarrSave()
 	if (!runtime || !dm)
 	{
 		g_instance = nullptr;
-		return ERR_CPX_INIT;
+		return ERR_ACQ_INIT;
 	}
 	
 	device_manager_select(dm,
@@ -987,8 +1022,8 @@ int AcquireCamera::enterZarrSave()
 		outStreamId.c_str(), outStreamId.size(),
 		&props.video[1].storage.identifier);
 
-	setFileName(props, 0, currentFileName);
-	setFileName(props, 1, currentFileName);
+	setFileName(props, 0, currentDirName + "/" + "stream1." + outStreamId);
+	setFileName(props, 1, currentDirName + "/" + "stream2." + outStreamId);
 
 	ret = acquire_configure(runtime, &props);
 	if (ret != AcquireStatus_Ok)
@@ -997,7 +1032,6 @@ int AcquireCamera::enterZarrSave()
 	ret = acquire_start(runtime);
 	if (ret != AcquireStatus_Ok)
 		return ret;
-
 
 	return DEVICE_OK;
 }
@@ -1019,7 +1053,7 @@ int AcquireCamera::exitZarrSave()
 	if (!runtime || !dm)
 	{
 		g_instance = nullptr;
-		return ERR_CPX_INIT;
+		return ERR_ACQ_INIT;
 	}
 
 	device_manager_select(dm,
