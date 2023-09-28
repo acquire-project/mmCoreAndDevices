@@ -45,7 +45,8 @@ const int DEMO_IMAGE_DEPTH = 1;
 
 const bool MULTI_CHANNEL = true;
 // const std::string outStreamId("Zarr");
-const std::string outStreamId("tiff");
+// const std::string outStreamId("tiff");
+std::vector<std::string> streamFormats = { "Zarr", "tiff" };
 
 const VideoFrame* next(VideoFrame* cur)
 {
@@ -65,7 +66,8 @@ AcquireCamera::AcquireCamera() :
 	stopOnOverflow(false),
 	currentCamera(0),
 	multiChannel(MULTI_CHANNEL),
-	liveThread(nullptr)
+	liveThread(nullptr),
+	streamId(streamFormats[0])
 {
 	// instantiate cpx
 	g_instance = this;
@@ -158,6 +160,11 @@ int AcquireCamera::Initialize()
 	}
 	else
 		demo = false;
+
+	// stream format
+	pAct = new CPropertyAction(this, &AcquireCamera::OnStreamFormat);
+	CreateProperty(g_prop_StreamFormat, streamId.c_str(), MM::String, false, pAct);
+	SetAllowedValues(g_prop_StreamFormat, streamFormats);
 
 	// test cpx loading
 	g_instance = this;
@@ -1014,16 +1021,16 @@ int AcquireCamera::enterZarrSave()
 	
 	device_manager_select(dm,
 		DeviceKind_Storage,
-		outStreamId.c_str(), outStreamId.size(),
+		streamId.c_str(), streamId.size(),
 		&props.video[0].storage.identifier);
 
 	device_manager_select(dm,
 		DeviceKind_Storage,
-		outStreamId.c_str(), outStreamId.size(),
+		streamId.c_str(), streamId.size(),
 		&props.video[1].storage.identifier);
 
-	setFileName(props, 0, currentDirName + "/" + "stream1." + outStreamId);
-	setFileName(props, 1, currentDirName + "/" + "stream2." + outStreamId);
+	setFileName(props, 0, currentDirName + "/" + "stream1." + streamId);
+	setFileName(props, 1, currentDirName + "/" + "stream2." + streamId);
 
 	ret = acquire_configure(runtime, &props);
 	if (ret != AcquireStatus_Ok)
@@ -1223,6 +1230,20 @@ int AcquireCamera::OnSavePrefix(MM::PropertyBase* pProp, MM::ActionType eAct)
 	else if (eAct == MM::AfterSet)
 	{
 		pProp->Get(savePrefix);
+	}
+
+	return DEVICE_OK;
+}
+
+int AcquireCamera::OnStreamFormat(MM::PropertyBase* pProp, MM::ActionType eAct)
+{
+	if (eAct == MM::BeforeGet)
+	{
+		pProp->Set(streamId.c_str());
+	}
+	else if (eAct == MM::AfterSet)
+	{
+		pProp->Get(streamId);
 	}
 
 	return DEVICE_OK;
