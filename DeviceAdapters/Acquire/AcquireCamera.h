@@ -47,7 +47,9 @@ static const char* g_prop_SavePrefix = "SavePrefix";
 static const char* g_prop_Camera_1 = "Camera_1";
 static const char* g_prop_Camera_2 = "Camera_2";
 static const char* g_prop_StreamFormat = "StreamFormat";
+static const char* g_prop_SetMetadata = "Metadata";
 static const char* g_Camera_None = "None";
+
 // constants for naming pixel types (allowed values of the "PixelType" property)
 static const char* g_PixelType_8bit = "8bit";
 static const char* g_PixelType_16bit = "16bit";
@@ -110,6 +112,7 @@ public:
 	int OnSaveRoot(MM::PropertyBase* pProp, MM::ActionType eAct);
 	int OnSavePrefix(MM::PropertyBase* pProp, MM::ActionType eAct);
 	int OnStreamFormat(MM::PropertyBase* pProp, MM::ActionType eAct);
+	int OnMetadata(MM::PropertyBase* pProp, MM::ActionType eAct);
 
 private:
 	bool initialized_;
@@ -130,6 +133,7 @@ private:
 	AcquireROI fullFrame;
 	int softwareTriggerId;
 	std::string streamId;
+	std::string zarrMetadata;
 
 	int getAcquireProperties(AcquireProperties& props) const;
 	int setAcquireProperties(AcquireProperties& props);

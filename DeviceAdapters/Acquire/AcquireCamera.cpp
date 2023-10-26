@@ -339,6 +339,13 @@ int AcquireCamera::Initialize()
 	if (ret != DEVICE_OK)
 		return ret;
 
+	// metadata 
+	pAct = new CPropertyAction(this, &AcquireCamera::OnMetadata);
+	ret = CreateProperty(g_prop_SetMetadata, zarrMetadata.c_str(), MM::String, false, pAct);
+	if (ret != DEVICE_OK)
+		return ret;
+
+
 	setupBuffers(props.video[0].camera.settings.shape.x, props.video[0].camera.settings.shape.y, props.video[0].camera.settings.pixel_type + 1, isDual());
 
 	initialized_ = true;
@@ -1244,6 +1251,20 @@ int AcquireCamera::OnStreamFormat(MM::PropertyBase* pProp, MM::ActionType eAct)
 	else if (eAct == MM::AfterSet)
 	{
 		pProp->Get(streamId);
+	}
+
+	return DEVICE_OK;
+}
+
+int AcquireCamera::OnMetadata(MM::PropertyBase* pProp, MM::ActionType eAct)
+{
+	if (eAct == MM::BeforeGet)
+	{
+		pProp->Set(zarrMetadata.c_str());
+	}
+	else if (eAct == MM::AfterSet)
+	{
+		pProp->Get(zarrMetadata);
 	}
 
 	return DEVICE_OK;
