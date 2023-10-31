@@ -69,6 +69,12 @@ AcquireCamera::AcquireCamera() :
 	liveThread(nullptr),
 	streamId(streamFormats[0])
 {
+
+	// set error messages
+	SetErrorText(ERR_SOFTWARE_TRIGGER_NOT_AVAILABLE, "Software trigger not available");
+	SetErrorText(ERR_FAILED_CREATING_ACQ_DIR, "Failed to create acquisition directory");
+
+
 	// instantiate cpx
 	g_instance = this;
 	runtime = acquire_init(AcquireCamera::reporter);
@@ -1096,7 +1102,7 @@ int AcquireCamera::getSoftwareTrigger(AcquirePropertyMetadata& meta, int stream)
 	int line = -1;
 	for (int i = 0; i < meta.video[stream].camera.digital_lines.line_count; ++i)
 	{
-		if (strcmp(meta.video[stream].camera.digital_lines.names[i], "Software") == 0) {
+		if (strcmp(meta.video[stream].camera.digital_lines.names[i], "software") == 0) {
 			line = i;
 			break;
 		}
