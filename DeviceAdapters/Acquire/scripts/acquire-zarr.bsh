@@ -1,0 +1,27 @@
+// Zarr streaming with Acquire
+// Micro-manager script
+// Applies current settings from MDI window to zarr stream.
+
+
+//import org.json.JSONObject;
+
+// get acquisition settings from the MDI window
+settings = mm.getAcquisitionManager().getAcquisitionSettings();
+acq = mmc.getCameraDevice();
+
+// TODO: create JSON based on settings
+//JSONObject meta = new JSONObject();
+//meta["Interval_ms"] = settings.intervalMs();
+// etc. etc.
+//mmc.setProperty("AcquireCamera", "Metadata", meta.toString());
+
+// set up acquisition
+mmc.setProperty(acq, "StreamFormat", "Zarr");
+mmc.setProperty(acq, "SaveRoot", settings.root());
+mmc.setProperty(acq, "SavePrefix", settings.prefix());
+mmc.setProperty(acq, "SaveToZarr", "1"); // turn on streaming
+
+// run acquisition
+mm.getAcquisitionManager().runAcquisition();
+
+mmc.setProperty(acq, "SaveToZarr", "0");
