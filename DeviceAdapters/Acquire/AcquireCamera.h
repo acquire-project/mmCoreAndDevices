@@ -47,7 +47,12 @@ static const char* g_prop_SavePrefix = "SavePrefix";
 static const char* g_prop_Camera_1 = "Camera_1";
 static const char* g_prop_Camera_2 = "Camera_2";
 static const char* g_prop_StreamFormat = "StreamFormat";
-static const char* g_prop_SetMetadata = "Metadata";
+static const char* g_prop_ZarrChannels = "ZarrChannels";
+static const char* g_prop_ZarrSlices = "ZarrSlices";
+static const char* g_prop_ZarrFrames = "ZarrFrames";
+static const char* g_prop_ZarrTimepoints = "ZarrTimepoints";
+static const char* g_prop_ZarrOrder = "ZarrOrder";
+static const char* g_prop_ZarrPositions = "ZarrPositions";
 static const char* g_Camera_None = "None";
 
 // constants for naming pixel types (allowed values of the "PixelType" property)
@@ -67,6 +72,9 @@ public:
 	int y;
 	int xSize;
 	int ySize;
+
+	AcquireROI() : x(0), y(0), xSize(0), ySize(0) {}
+	~AcquireROI() {}
 };
 
 class AcquireCamera : public CCameraBase<AcquireCamera>
@@ -112,7 +120,12 @@ public:
 	int OnSaveRoot(MM::PropertyBase* pProp, MM::ActionType eAct);
 	int OnSavePrefix(MM::PropertyBase* pProp, MM::ActionType eAct);
 	int OnStreamFormat(MM::PropertyBase* pProp, MM::ActionType eAct);
-	int OnMetadata(MM::PropertyBase* pProp, MM::ActionType eAct);
+
+	int OnZarrChannels(MM::PropertyBase* pProp, MM::ActionType eAct);
+	int OnZarrSlices(MM::PropertyBase* pProp, MM::ActionType eAct);
+	int OnZarrFrames(MM::PropertyBase* pProp, MM::ActionType eAct);
+	int OnZarrPositions(MM::PropertyBase* pProp, MM::ActionType eAct);
+	int OnZarrOrder(MM::PropertyBase* pProp, MM::ActionType eAct);
 
 private:
 	bool initialized_;
@@ -133,7 +146,13 @@ private:
 	AcquireROI fullFrame;
 	int softwareTriggerId;
 	std::string streamId;
-	std::string zarrMetadata;
+
+	// zarr metadata
+	long zarrChannels;
+	long zarrSlices;
+	long zarrFrames;
+	long zarrPositions;
+	long zarrOrder;
 
 	int getAcquireProperties(AcquireProperties& props) const;
 	int setAcquireProperties(AcquireProperties& props);

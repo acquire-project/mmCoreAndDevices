@@ -2,25 +2,23 @@
 // Micro-manager script
 // Applies current settings from MDI window to zarr stream.
 
-// use MM internal, built in version of JSON
-// might not be the same as the latest JSON API
-import mmcorej.org.json.*;
-
 // get acquisition settings from the MDI window
 settings = mm.getAcquisitionManager().getAcquisitionSettings();
 acq = mmc.getCameraDevice();
 
-// create JSON based on settings
-JSONObject meta = new JSONObject();
-meta.put("intervalMs", settings.intervalMs());
-meta.put("acqOrderMode", settings.acqOrderMode());
-//channels = settings.channels();
-//meta.put("numChannels", channels.size());
-//meta.put("numFrames", settings.numFrames());
-//meta.put("numSlices", settings.slices().size());
+// set zarr dimensions from Multi-D Window settings
+mmc.setProperty(acq, "ZarrChannels", settings.channels().size());																// C dim
+mmc.setProperty(acq, "ZarrSlices", settings.slices().size());																	// Z dim
+mmc.setProperty(acq, "ZarrFrames", settings.numFrames());																		// T dim
+mmc.setProperty(acq, "ZarrPositions", mm.getPositionListManager().getPositionList().getPositions().length); 	// P dim
+mmc.setProperty(acq, "ZarrOrder", settings.acqOrderMode());																		// order of dimensions as ID
+/*
+	0 - AcqOrderMode.TIME_POS_SLICE_CHANNEL
+	1 - AcqOrderMode.TIME_POS_CHANNEL_SLICE
+	2 - AcqOrderMode.POS_TIME_SLICE_CHANNEL
+	3 - AcqOrderMode.POS_TIME_CHANNEL_SLICE
+*/
 
-// TODO:  etc. etc.
-mmc.setProperty("AcquireCamera", "Metadata", meta.toString());
 
 // set up acquisition
 mmc.setProperty(acq, "StreamFormat", "Zarr");

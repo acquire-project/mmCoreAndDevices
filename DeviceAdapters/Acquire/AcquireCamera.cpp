@@ -67,7 +67,12 @@ AcquireCamera::AcquireCamera() :
 	currentCamera(0),
 	multiChannel(MULTI_CHANNEL),
 	liveThread(nullptr),
-	streamId(streamFormats[0])
+	streamId(streamFormats[0]),
+	zarrChannels(0),
+	zarrFrames(0),
+	zarrSlices(0),
+	zarrPositions(0),
+	zarrOrder(0)
 {
 
 	// set error messages
@@ -346,11 +351,30 @@ int AcquireCamera::Initialize()
 		return ret;
 
 	// metadata 
-	pAct = new CPropertyAction(this, &AcquireCamera::OnMetadata);
-	ret = CreateProperty(g_prop_SetMetadata, zarrMetadata.c_str(), MM::String, false, pAct);
+	pAct = new CPropertyAction(this, &AcquireCamera::OnZarrChannels);
+	ret = CreateProperty(g_prop_ZarrChannels, to_string(zarrChannels).c_str(), MM::Integer, false, pAct);
 	if (ret != DEVICE_OK)
 		return ret;
 
+	pAct = new CPropertyAction(this, &AcquireCamera::OnZarrSlices);
+	ret = CreateProperty(g_prop_ZarrSlices, to_string(zarrSlices).c_str(), MM::Integer, false, pAct);
+	if (ret != DEVICE_OK)
+		return ret;
+
+	pAct = new CPropertyAction(this, &AcquireCamera::OnZarrFrames);
+	ret = CreateProperty(g_prop_ZarrFrames, to_string(zarrFrames).c_str(), MM::Integer, false, pAct);
+	if (ret != DEVICE_OK)
+		return ret;
+
+	pAct = new CPropertyAction(this, &AcquireCamera::OnZarrPositions);
+	ret = CreateProperty(g_prop_ZarrPositions, to_string(zarrPositions).c_str(), MM::String, false, pAct);
+	if (ret != DEVICE_OK)
+		return ret;
+
+	pAct = new CPropertyAction(this, &AcquireCamera::OnZarrOrder);
+	ret = CreateProperty(g_prop_ZarrOrder, to_string(zarrOrder).c_str(), MM::Integer, false, pAct);
+	if (ret != DEVICE_OK)
+		return ret;
 
 	setupBuffers(props.video[0].camera.settings.shape.x, props.video[0].camera.settings.shape.y, props.video[0].camera.settings.pixel_type + 1, isDual());
 
@@ -1262,16 +1286,73 @@ int AcquireCamera::OnStreamFormat(MM::PropertyBase* pProp, MM::ActionType eAct)
 	return DEVICE_OK;
 }
 
-int AcquireCamera::OnMetadata(MM::PropertyBase* pProp, MM::ActionType eAct)
+int AcquireCamera::OnZarrChannels(MM::PropertyBase* pProp, MM::ActionType eAct)
 {
 	if (eAct == MM::BeforeGet)
 	{
-		pProp->Set(zarrMetadata.c_str());
+		pProp->Set(zarrChannels);
 	}
 	else if (eAct == MM::AfterSet)
 	{
-		pProp->Get(zarrMetadata);
+		pProp->Get(zarrChannels);
 	}
 
 	return DEVICE_OK;
+}
+
+int AcquireCamera::OnZarrSlices(MM::PropertyBase* pProp, MM::ActionType eAct)
+{
+	if (eAct == MM::BeforeGet)
+	{
+		pProp->Set(zarrSlices);
+	}
+	else if (eAct == MM::AfterSet)
+	{
+		pProp->Get(zarrSlices);
+	}
+
+	return DEVICE_OK;
+}
+
+int AcquireCamera::OnZarrFrames(MM::PropertyBase* pProp, MM::ActionType eAct)
+{
+	if (eAct == MM::BeforeGet)
+	{
+		pProp->Set(zarrFrames);
+	}
+	else if (eAct == MM::AfterSet)
+	{
+		pProp->Get(zarrFrames);
+	}
+
+	return DEVICE_OK;
+}
+
+int AcquireCamera::OnZarrPositions(MM::PropertyBase* pProp, MM::ActionType eAct)
+{
+	if (eAct == MM::BeforeGet)
+	{
+		pProp->Set(zarrPositions);
+	}
+	else if (eAct == MM::AfterSet)
+	{
+		pProp->Get(zarrPositions);
+	}
+
+	return DEVICE_OK;
+}
+
+int AcquireCamera::OnZarrOrder(MM::PropertyBase* pProp, MM::ActionType eAct)
+{
+	if (eAct == MM::BeforeGet)
+	{
+		pProp->Set(zarrOrder);
+	}
+	else if (eAct == MM::AfterSet)
+	{
+		pProp->Get(zarrOrder);
+	}
+
+	return DEVICE_OK;
+
 }
