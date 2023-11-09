@@ -28,6 +28,7 @@
 #include <thread>
 #include "SequenceThread.h"
 #include "boost/filesystem.hpp"
+#include "json.hpp" // from https://json.nlohmann.me/ release v3.7.3, under MIT license https://json.nlohmann.me/home/license/
 
 
 /// Helper for passing size static strings as function args.
@@ -36,6 +37,7 @@
 #define SIZED(str) str, sizeof(str) - 1
 
 using namespace std;
+using json = nlohmann::json;
 
 const char* cameraName = "AcquireCamera";
 AcquireCamera* AcquireCamera::g_instance = nullptr;
@@ -1068,6 +1070,19 @@ int AcquireCamera::enterZarrSave()
 
 	setFileName(props, 0, currentDirName + "/" + "stream1." + streamId);
 	setFileName(props, 1, currentDirName + "/" + "stream2." + streamId);
+
+	// create zarr metadata
+	json meta;
+	meta[g_prop_ZarrChannels] = zarrChannels;
+	meta[g_prop_ZarrSlices] = zarrSlices;
+	meta[g_prop_ZarrFrames] = zarrFrames;
+	meta[g_prop_ZarrPositions] = zarrPositions;
+	meta[g_prop_ZarrOrder] = zarrOrder;
+	ostringstream os;
+	os << "{" << setw(3) << meta << "}"; // serialize to string
+
+	// send metadata to acquire
+	storage_properties_set_external_metadata(&props.video->storage.settings, os.str().c_str(), os.str().size());
 
 	ret = acquire_configure(runtime, &props);
 	if (ret != AcquireStatus_Ok)
