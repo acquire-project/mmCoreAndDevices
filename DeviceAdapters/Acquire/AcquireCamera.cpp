@@ -1079,7 +1079,7 @@ int AcquireCamera::enterZarrSave()
 	meta[g_prop_ZarrPositions] = zarrPositions;
 	meta[g_prop_ZarrOrder] = zarrOrder;
 	ostringstream os;
-	os << "{" << setw(3) << meta << "}"; // serialize to string
+	os << setw(3) << meta; // serialize to string
 
 	// send metadata to acquire
 	storage_properties_set_external_metadata(&props.video->storage.settings, os.str().c_str(), os.str().size() + 1);
