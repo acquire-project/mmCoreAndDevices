@@ -179,7 +179,7 @@ int AcquireCamera::Initialize()
 	CreateProperty(g_prop_StreamFormat, streamId.c_str(), MM::String, false, pAct);
 	SetAllowedValues(g_prop_StreamFormat, streamFormats);
 
-	// test cpx loading
+	// test acquire loading
 	g_instance = this;
 	runtime = acquire_init(AcquireCamera::reporter);
 	auto dm = acquire_device_manager(runtime);
@@ -197,24 +197,24 @@ int AcquireCamera::Initialize()
 	ret = device_manager_select(dm, DeviceKind_Camera, camera1.c_str(), camera1.size(), &props.video[0].camera.identifier);
 	if (ret != AcquireStatus_Ok)
 		return ret;
-	
-	if (isDual())
-	{
-		ret = device_manager_select(dm, DeviceKind_Camera, camera2.c_str(), camera2.size(), &props.video[1].camera.identifier);
-		if (ret != AcquireStatus_Ok)
-			return ret;
-	}
 
 	// disable storage
 	device_manager_select(dm,
 		DeviceKind_Storage,
 		SIZED("Trash"),
 		&props.video[0].storage.identifier);
+	
+	if (isDual())
+	{
+		ret = device_manager_select(dm, DeviceKind_Camera, camera2.c_str(), camera2.size(), &props.video[1].camera.identifier);
+		if (ret != AcquireStatus_Ok)
+			return ret;
 
-	device_manager_select(dm,
-		DeviceKind_Storage,
-		SIZED("Trash"),
-		&props.video[1].storage.identifier);
+		device_manager_select(dm,
+			DeviceKind_Storage,
+			SIZED("Trash"),
+			&props.video[1].storage.identifier);
+	}
 
 	ret = acquire_configure(runtime, &props);
 	if (ret != AcquireStatus_Ok)
@@ -261,13 +261,11 @@ int AcquireCamera::Initialize()
 		props.video[0].camera.settings.shape = { (unsigned)meta.video[0].camera.shape.x.high, (unsigned)meta.video[0].camera.shape.y.high };
 	
 	props.video[0].camera.settings.offset = { 0, 0 };
-	props.video[0].max_frame_count = 1;
 	props.video[0].camera.settings.exposure_time_us = 20000;
 	props.video[0].camera.settings.binning = 1;
 
 	props.video[1].camera.settings.shape = props.video[0].camera.settings.shape;
 	props.video[1].camera.settings.offset = props.video[0].camera.settings.offset;
-	props.video[1].max_frame_count = props.video[0].max_frame_count;
 	props.video[1].camera.settings.binning = props.video[0].camera.settings.binning;
 	props.video[1].camera.settings.exposure_time_us = props.video[0].camera.settings.exposure_time_us;
 
@@ -294,9 +292,10 @@ int AcquireCamera::Initialize()
 	if (ret != AcquireStatus_Ok)
 		return ret;
 
-	VideoFrame* beg, * end;
-	acquire_map_read(runtime, 0, &beg, &end);
-	acquire_map_read(runtime, 1, &beg, &end);
+	// NOTE: not necessary, session with Alan
+	// VideoFrame* beg, * end;
+	// acquire_map_read(runtime, 0, &beg, &end);
+	// acquire_map_read(runtime, 1, &beg, &end);
 
 	// START acquiring
 	ret = acquire_start(runtime);
@@ -454,9 +453,14 @@ void AcquireCamera::SetExposure(double exposure)
 	if (isDual())
 		props.video[1].camera.settings.exposure_time_us = props.video[0].camera.settings.exposure_time_us;
 
+	acquire_abort(runtime);
 	ret = setAcquireProperties(props);
 	if (ret != DEVICE_OK)
 		LogMessage("Error setting exposure: code=" + ret);
+	acquire_start(runtime);
+	LogMessage("Acquire run state: " + acquire_get_state(runtime));
+	// auto state = acquire_get_state(runtime);
+	// assert(state == DeviceState_Running);
 
 }
 
@@ -590,13 +594,17 @@ unsigned AcquireCamera::GetImageBytesPerPixel() const
 
 int AcquireCamera::SnapImage()
 {
+	auto state = acquire_get_state(runtime);
 	AcquireStatusCode aret = acquire_execute_trigger(runtime, 0);
 	if (aret != AcquireStatusCode::AcquireStatus_Ok)
 		return aret;
 
-	aret = acquire_execute_trigger(runtime, 1);
-	if (aret != AcquireStatusCode::AcquireStatus_Ok)
-		return aret;
+	if (isDual())
+	{
+		aret = acquire_execute_trigger(runtime, 1);
+		if (aret != AcquireStatusCode::AcquireStatus_Ok)
+			return aret;
+	}
 
 	int ret = readSnapImageFrames();
 	if (ret != DEVICE_OK)
@@ -1063,13 +1071,17 @@ int AcquireCamera::enterZarrSave()
 		streamId.c_str(), streamId.size(),
 		&props.video[0].storage.identifier);
 
-	device_manager_select(dm,
-		DeviceKind_Storage,
-		streamId.c_str(), streamId.size(),
-		&props.video[1].storage.identifier);
-
 	setFileName(props, 0, currentDirName + "/" + "stream1." + streamId);
-	setFileName(props, 1, currentDirName + "/" + "stream2." + streamId);
+
+	if (isDual())
+	{
+		device_manager_select(dm,
+			DeviceKind_Storage,
+			streamId.c_str(), streamId.size(),
+			&props.video[1].storage.identifier);
+
+		setFileName(props, 1, currentDirName + "/" + "stream2." + streamId);
+	}
 
 	// create zarr metadata
 	json meta;
@@ -1079,10 +1091,9 @@ int AcquireCamera::enterZarrSave()
 	meta[g_prop_ZarrPositions] = zarrPositions;
 	meta[g_prop_ZarrOrder] = zarrOrder;
 	ostringstream os;
-	os << setw(3) << meta; // serialize to string
-
-	// send metadata to acquire
-	storage_properties_set_external_metadata(&props.video->storage.settings, os.str().c_str(), os.str().size() + 1);
+	//os << setw(3) << meta; // serialize to string
+	os << meta;
+	string metaStr = os.str();
 
 	ret = acquire_configure(runtime, &props);
 	if (ret != AcquireStatus_Ok)
@@ -1120,10 +1131,13 @@ int AcquireCamera::exitZarrSave()
 		SIZED("Trash"),
 		&props.video[0].storage.identifier);
 
-	device_manager_select(dm,
-		DeviceKind_Storage,
-		SIZED("Trash"),
-		&props.video[1].storage.identifier);
+	if (isDual())
+	{
+		device_manager_select(dm,
+			DeviceKind_Storage,
+			SIZED("Trash"),
+			&props.video[1].storage.identifier);
+	}
 
 	ret = acquire_configure(runtime, &props);
 	if (ret != AcquireStatus_Ok)
@@ -1141,9 +1155,19 @@ int AcquireCamera::getSoftwareTrigger(AcquirePropertyMetadata& meta, int stream)
 	int line = -1;
 	for (int i = 0; i < meta.video[stream].camera.digital_lines.line_count; ++i)
 	{
-		if (strcmp(meta.video[stream].camera.digital_lines.names[i], "software") == 0) {
+		if (strcmp(meta.video[stream].camera.digital_lines.names[i], "Software") == 0) {
 			line = i;
 			break;
+		}
+	}
+	// try again with lowercase
+	if (line == -1) {
+		for (int i = 0; i < meta.video[stream].camera.digital_lines.line_count; ++i)
+		{
+			if (strcmp(meta.video[stream].camera.digital_lines.names[i], "software") == 0) {
+				line = i;
+				break;
+			}
 		}
 	}
 
