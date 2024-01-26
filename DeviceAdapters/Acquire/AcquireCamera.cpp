@@ -1098,7 +1098,7 @@ int AcquireCamera::enterZarrSave()
 	// set chunking
 	const int numPlanes = 100;
 	const int maxChunkSizeBytes = 10000000; // 10 MB
-	assert(storage_properties_set_chunking_props(&props.video->storage.settings, imgs[0].Width(), imgs[0].Height(), numPlanes, maxChunkSizeBytes) == 1);
+	assert(storage_properties_set_chunking_props(&props.video->storage.settings, imgs[0].Width(), imgs[0].Height(), numPlanes) == 1);
 
 	ret = acquire_configure(runtime, &props);
 	if (ret != AcquireStatus_Ok)
