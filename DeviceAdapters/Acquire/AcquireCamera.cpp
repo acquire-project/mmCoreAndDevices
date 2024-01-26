@@ -48,7 +48,7 @@ const int DEMO_IMAGE_DEPTH = 1;
 const bool MULTI_CHANNEL = true;
 // const std::string outStreamId("Zarr");
 // const std::string outStreamId("tiff");
-std::vector<std::string> streamFormats = { "Zarr", "tiff" };
+std::vector<std::string> streamFormats = { "Zarr", "ZarrV3", "tiff"};
 
 const VideoFrame* next(VideoFrame* cur)
 {
