@@ -1093,7 +1093,12 @@ int AcquireCamera::enterZarrSave()
 	ostringstream os;
 	os << setw(3) << meta; // serialize to string
 	string metaStr = os.str();
-	storage_properties_set_external_metadata(&props.video->storage.settings, os.str().c_str(), os.str().size() + 1);
+	assert(storage_properties_set_external_metadata(&props.video->storage.settings, os.str().c_str(), os.str().size() + 1) == 1);
+
+	// set chunking
+	const int numPlanes = 100;
+	const int maxChunkSizeBytes = 10000000; // 10 MB
+	assert(storage_properties_set_chunking_props(&props.video->storage.settings, imgs[0].Width(), imgs[0].Height(), numPlanes, maxChunkSizeBytes) == 1);
 
 	ret = acquire_configure(runtime, &props);
 	if (ret != AcquireStatus_Ok)
